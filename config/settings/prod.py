@@ -1,0 +1,19 @@
+import os
+
+from .base import *  # noqa: F403
+
+DEBUG = False
+
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")  # noqa: F405
+
+CORS_ALLOW_ALL_ORIGINS = (
+    os.getenv("DJANGO_CORS_ALLOW_ALL_ORIGINS", "false").lower() == "true"
+)
+
+if not CORS_ALLOW_ALL_ORIGINS:
+    CORS_ALLOWED_ORIGINS = env_list("DJANGO_CORS_ALLOWED_ORIGINS")  # noqa: F405
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+SECURE_SSL_REDIRECT = os.getenv("DJANGO_SECURE_SSL_REDIRECT", "true").lower() == "true"

@@ -1,0 +1,34 @@
+# Virtual environment and Python caches
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+
+# Test and coverage artifacts
+.coverage
+htmlcov/
+
+# Local environment, logs, and OS metadata
+.env
+.env.*
+*.log
+.DS_Store
+
+# Django runtime data and local databases
+media/
+staticfiles/
+db.sqlite3
+*.sqlite3
+
+# Git and editor metadata not needed in the image
+.git/
+.gitignore
+.vscode/
+
+# Project files not required at runtime
+README.md
+LICENSE
+docker-compose.yml
+Dockerfile
