@@ -1,5 +1,9 @@
+from typing import cast
+
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
+
+from .models import UserManager
 
 User = get_user_model()
 
@@ -12,7 +16,8 @@ class RegisterSerializer(serializers.ModelSerializer):
         fields = ["full_name", "email", "password"]
 
     def create(self, validated_data):
-        return User.objects.create_user(**validated_data)
+        manager = cast(UserManager, User.objects)
+        return manager.create_user(**validated_data)
 
 
 class ChangePasswordSerializer(serializers.Serializer):
