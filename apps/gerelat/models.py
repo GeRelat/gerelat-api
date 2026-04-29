@@ -117,8 +117,8 @@ class Template(models.Model):
         Programa,
         on_delete=models.CASCADE,
         related_name="templates",
-        null=True,
-        blank=True,
+        null=False,
+        blank=False,
     )
     projeto = models.ForeignKey(
         Projeto,
