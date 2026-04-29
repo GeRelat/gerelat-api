@@ -1,5 +1,15 @@
-from rest_framework import viewsets
+import uuid
+from typing import Any, cast
 
+from celery.result import AsyncResult
+from django.core.files.storage import default_storage
+from django.http import FileResponse
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.response import Response
+
+from .constants import DOCX_ALLOWED_MIME
 from .models import (
     ClasseEvento,
     EquipePrograma,
@@ -24,8 +34,10 @@ from .serializers import (
     ProjetoSerializer,
     RelatorioSerializer,
     TemplateClasseEventoSerializer,
+    TemplateCreateRequestSerializer,
     TemplateSerializer,
 )
+from .tasks import create_template
 
 
 class ProgramaViewSet(viewsets.ModelViewSet):
@@ -71,6 +83,73 @@ class EventoViewSet(viewsets.ModelViewSet):
 class TemplateViewSet(viewsets.ModelViewSet):
     queryset = Template.objects.all()
     serializer_class = TemplateSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, pk=None):
+        template = self.get_object()
+        stored_path = template.modelo_arquivo_base
+
+        if not default_storage.exists(stored_path):
+            return Response(
+                {"detail": "Arquivo não encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        file_obj = default_storage.open(stored_path, "rb")
+
+        filename = f"{template.nome_template}.docx"
+        return FileResponse(
+            file_obj,
+            content_type=DOCX_ALLOWED_MIME,
+            as_attachment=True,
+            filename=filename,
+        )
+
+    def create(self, request, *args, **kwargs):
+        serializer = TemplateCreateRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        validated_data = serializer.validated_data
+        arquivo_base = validated_data["modelo_arquivo_base"]
+        programa = validated_data["programa"]
+        projeto = validated_data.get("projeto")
+
+        arquivo_base.content_type = DOCX_ALLOWED_MIME
+
+        object_name = f"{uuid.uuid4()}.docx"
+        stored_path = default_storage.save(object_name, arquivo_base)
+
+        task = cast(Any, create_template).delay(
+            stored_path=stored_path,
+            nome_template=validated_data["nome_template"],
+            programa_id=programa.pk,
+            projeto_id=projeto.pk if projeto else None,
+        )
+
+        return Response(
+            {
+                "detail": "Solicitação recebida e enviada para processamento.",
+                "task_id": task.id,
+                "task_status": "PENDING",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=False, methods=["get"], url_path=r"tasks/(?P<task_id>[^/.]+)")
+    def task_status(self, request, task_id=None):
+        async_result = AsyncResult(task_id)
+        response_payload = {
+            "task_id": task_id,
+            "task_status": async_result.state,
+        }
+
+        if async_result.state == "SUCCESS":
+            response_payload["result"] = async_result.result
+        elif async_result.state == "FAILURE":
+            response_payload["error"] = str(async_result.result)
+
+        return Response(response_payload, status=status.HTTP_200_OK)
 
 
 class TemplateClasseEventoViewSet(viewsets.ModelViewSet):
