@@ -38,6 +38,9 @@ exclude = ["__pycache__", ".venv", ".pytest_cache", ".ruff_cache", "*.md"]
 select = ["E", "F", "I", "B", "UP"]
 fixable = ["ALL"]
 
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["E501"]
+
 [tool.ruff.lint.isort]
 combine-as-imports = true
 
