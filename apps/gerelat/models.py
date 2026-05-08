@@ -22,7 +22,7 @@ class ProgramaCampo(models.Model):
     descricao = models.CharField(max_length=255)
     tipo = models.CharField(max_length=50)
     obrigatorio = models.BooleanField(default=False)
-    valor = models.TextField(blank=True, default="")
+    valor = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
         return f"{self.programa.nome} - {self.referencia}"
@@ -63,7 +63,7 @@ class ProjetoCampo(models.Model):
     descricao = models.CharField(max_length=255)
     tipo = models.CharField(max_length=50)
     obrigatorio = models.BooleanField(default=False)
-    valor = models.TextField(blank=True, default="")
+    valor = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
         return f"{self.projeto.nome} - {self.referencia}"
