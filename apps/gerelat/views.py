@@ -11,6 +11,7 @@ from rest_framework.response import Response
 
 from .constants import DOCX_ALLOWED_MIME
 from .models import (
+    Asset,
     ClasseEvento,
     EquipePrograma,
     EquipeProjeto,
@@ -24,6 +25,8 @@ from .models import (
     TemplateClasseEvento,
 )
 from .serializers import (
+    AssetCreateRequestSerializer,
+    AssetSerializer,
     ClasseEventoSerializer,
     EquipeProgramaSerializer,
     EquipeProjetoSerializer,
@@ -38,6 +41,17 @@ from .serializers import (
     TemplateSerializer,
 )
 from .tasks import create_template
+
+
+class AssetViewSet(viewsets.ModelViewSet):
+    queryset = Asset.objects.all()
+    serializer_class = AssetSerializer
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return AssetCreateRequestSerializer
+        return AssetSerializer
 
 
 class ProgramaViewSet(viewsets.ModelViewSet):

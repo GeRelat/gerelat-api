@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from .constants import DOCX_ALLOWED_MIME
 from .models import (
+    Asset,
     ClasseEvento,
     EquipePrograma,
     EquipeProjeto,
@@ -16,6 +17,31 @@ from .models import (
     Template,
     TemplateClasseEvento,
 )
+
+
+class AssetSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Asset
+        fields = "__all__"
+
+
+class AssetCreateRequestSerializer(serializers.Serializer):
+    arquivo = serializers.ImageField()
+    descricao = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+    def validate_arquivo(self, value):
+        max_size = 50 * 1024 * 1024
+        if value.size > max_size:
+            raise serializers.ValidationError("Tamanho máximo permitido: 50MB.")
+
+        detected_content_type = getattr(value, "content_type", None)
+        if detected_content_type and not detected_content_type.startswith("image/"):
+            raise serializers.ValidationError("Tipo de arquivo inválido para upload.")
+
+        return value
+
+    def create(self, validated_data):
+        return Asset.objects.create(**validated_data)
 
 
 class ProgramaSerializer(serializers.ModelSerializer):
