@@ -17,6 +17,7 @@ dependencies = [
     "drf-spectacular>=0.29.0",
     "flower>=2.0.1",
     "granian>=2.7.3",
+    "pillow>=12.2.0",
     "psycopg[binary]>=3.3.3",
 ]
 
