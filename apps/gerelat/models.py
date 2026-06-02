@@ -185,10 +185,14 @@ class Asset(models.Model):
 class Relatorio(models.Model):
     id_relatorio = models.AutoField(primary_key=True)
     evento = models.ForeignKey(
-        Evento, on_delete=models.CASCADE, related_name="relatorios"
+        Evento,
+        on_delete=models.SET_NULL,
+        related_name="relatorios",
+        null=True,
+        blank=True,
     )
     template = models.ForeignKey(
-        Template, on_delete=models.CASCADE, related_name="relatorios"
+        Template, on_delete=models.PROTECT, related_name="relatorios"
     )
     arquivo_gerado = models.CharField(max_length=255)
     status = models.CharField(max_length=50)
