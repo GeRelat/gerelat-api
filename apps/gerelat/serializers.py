@@ -145,3 +145,37 @@ class RelatorioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Relatorio
         fields = "__all__"
+
+
+class RelatorioGenerateRequestSerializer(serializers.Serializer):
+    evento = serializers.PrimaryKeyRelatedField(
+        queryset=Evento.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    template = serializers.PrimaryKeyRelatedField(
+        queryset=Template.objects.all(),
+        required=True,
+    )
+
+    def validate(self, attrs):
+        evento = attrs.get("evento")
+        template = attrs["template"]
+
+        if evento:
+            if template.projeto_id and template.projeto_id != evento.projeto_id:
+                raise serializers.ValidationError(
+                    "O template informado não pertence ao projeto do evento."
+                )
+
+            if template.programa_id != evento.projeto.programa_id:
+                raise serializers.ValidationError(
+                    "O template informado não pertence ao programa do evento."
+                )
+
+        if not evento and not template.projeto_id:
+            raise serializers.ValidationError(
+                "Informe um evento ou use um template vinculado a um projeto."
+            )
+
+        return attrs

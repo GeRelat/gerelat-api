@@ -10,6 +10,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
 from .constants import DOCX_ALLOWED_MIME
+from .document_engine.utils import build_render_context, render_docx_from_template
 from .models import (
     Asset,
     ClasseEvento,
@@ -35,12 +36,13 @@ from .serializers import (
     ProgramaSerializer,
     ProjetoCampoSerializer,
     ProjetoSerializer,
+    RelatorioGenerateRequestSerializer,
     RelatorioSerializer,
     TemplateClasseEventoSerializer,
     TemplateCreateRequestSerializer,
     TemplateSerializer,
 )
-from .tasks import create_template
+from .tasks import create_template, generate_relatorio
 
 
 class AssetViewSet(viewsets.ModelViewSet):
@@ -174,3 +176,51 @@ class TemplateClasseEventoViewSet(viewsets.ModelViewSet):
 class RelatorioViewSet(viewsets.ModelViewSet):
     queryset = Relatorio.objects.all()
     serializer_class = RelatorioSerializer
+
+    @action(detail=False, methods=["post"], url_path="gerar")
+    def gerar(self, request):
+        serializer = RelatorioGenerateRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        evento = serializer.validated_data.get("evento")
+        template = serializer.validated_data["template"]
+
+        task = cast(Any, generate_relatorio).delay(
+            evento_id=evento.id_evento if evento else None,
+            template_id=template.id_template,
+        )
+
+        return Response(
+            {
+                "detail": "Solicitação recebida e enviada para processamento.",
+                "task_id": task.id,
+                "task_status": "PENDING",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, pk=None):
+        relatorio = self.get_object()
+        template = relatorio.template
+        raw_context = relatorio.metadados if relatorio.metadados else None
+
+        if not raw_context:
+            return Response(
+                {"detail": "Metadados do relatório não encontrados."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        context = build_render_context(raw_context)
+        output_buffer = render_docx_from_template(
+            template.modelo_arquivo_base,
+            context,
+        )
+
+        filename = f"{relatorio.nome}.docx"
+        return FileResponse(
+            output_buffer,
+            content_type=DOCX_ALLOWED_MIME,
+            as_attachment=True,
+            filename=filename,
+        )
