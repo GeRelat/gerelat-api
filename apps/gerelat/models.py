@@ -195,6 +195,7 @@ class Relatorio(models.Model):
         Template, on_delete=models.PROTECT, related_name="relatorios"
     )
     arquivo_gerado = models.CharField(max_length=255)
+    nome = models.CharField(max_length=150, blank=True, default="")
     status = models.CharField(max_length=50)
     metadados = models.JSONField(default=dict, blank=True)
     data_criacao = models.DateTimeField(auto_now_add=True)
