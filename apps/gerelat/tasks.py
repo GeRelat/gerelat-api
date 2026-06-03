@@ -1,27 +1,57 @@
 import logging
 
 from celery import shared_task
-from docxtpl import DocxTemplate
 
-from .models import Template
+from .models import Evento, ProjetoCampo, Relatorio, Template
 
 logger = logging.getLogger(__name__)
 
 
-@shared_task
-def task_relatorio_exemplo(data):
-    doc = DocxTemplate(data["template_path"])
+@shared_task(
+    bind=True,
+    autoretry_for=(OSError,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def generate_relatorio(
+    self,
+    *,
+    evento_id: int | None,
+    template_id: int,
+) -> dict[str, str | int]:
+    try:
+        template = Template.objects.get(id_template=template_id)
 
-    context = {
-        "empresa": "BRISA",
-        "parceira": "FURG",
-        "assunto": "Acompanhamento da execução do Projeto",
-        "data": "13/03/2026",
-        "horario": "16h - 17h",
-        "coord_local": {"nome": "João Silva", "funcao": "Coordenador Local Geral"},
-    }
-    doc.render(context)
-    doc.save(data["output_path"])
+        evento = None
+        projeto_id = template.projeto_id
+        if evento_id:
+            evento = Evento.objects.select_related("projeto", "projeto__programa").get(
+                id_evento=evento_id
+            )
+            projeto_id = evento.projeto_id
+
+        if not projeto_id:
+            raise ValueError("Projeto não encontrado para gerar relatório.")
+
+        campos = ProjetoCampo.objects.filter(projeto_id=projeto_id)
+        context = {campo.referencia: campo.valor for campo in campos}
+
+        relatorio = Relatorio.objects.create(
+            evento_id=evento.id_evento if evento else None,
+            template_id=template_id,
+            nome=template.nome_template,
+            arquivo_gerado="",
+            status="SUCCESS",
+            metadados=context,
+        )
+
+        return {
+            "task_id": self.request.id,
+            "id_relatorio": relatorio.id_relatorio,
+        }
+    except Exception:
+        logger.exception("Falha ao gerar relatório.")
+        raise
 
 
 @shared_task(

@@ -5,6 +5,7 @@ from . import views
 
 app_name = "gerelat"
 router = DefaultRouter()
+router.register(r"assets", views.AssetViewSet)
 router.register(r"programas", views.ProgramaViewSet)
 router.register(r"programa-campos", views.ProgramaCampoViewSet)
 router.register(r"equipes-programa", views.EquipeProgramaViewSet)

@@ -1,5 +1,9 @@
 from django.db import models
 
+from .document_engine import validate_document_value
+from .enums import CampoTipo
+from .utils.uploads import asset_upload_to
+
 
 class Programa(models.Model):
     id_programa = models.AutoField(primary_key=True)
@@ -20,9 +24,13 @@ class ProgramaCampo(models.Model):
     )
     referencia = models.CharField(max_length=100)
     descricao = models.CharField(max_length=255)
-    tipo = models.CharField(max_length=50)
+    tipo = models.CharField(max_length=50, choices=CampoTipo.choices)
     obrigatorio = models.BooleanField(default=False)
     valor = models.JSONField(default=dict, blank=True)
+
+    def clean(self) -> None:
+        super().clean()
+        validate_document_value(self.tipo, self.valor)
 
     def __str__(self):
         return f"{self.programa.nome} - {self.referencia}"
@@ -61,9 +69,13 @@ class ProjetoCampo(models.Model):
     )
     referencia = models.CharField(max_length=100)
     descricao = models.CharField(max_length=255)
-    tipo = models.CharField(max_length=50)
+    tipo = models.CharField(max_length=50, choices=CampoTipo.choices)
     obrigatorio = models.BooleanField(default=False)
     valor = models.JSONField(default=dict, blank=True)
+
+    def clean(self) -> None:
+        super().clean()
+        validate_document_value(self.tipo, self.valor)
 
     def __str__(self):
         return f"{self.projeto.nome} - {self.referencia}"
@@ -158,15 +170,32 @@ class TemplateClasseEvento(models.Model):
         return f"{self.template.nome_template} - {self.classe_evento.nome_classe}"
 
 
+class Asset(models.Model):
+    descricao = models.CharField(max_length=255, blank=True, default="")
+
+    def _upload_to(self, filename: str) -> str:
+        return asset_upload_to(filename)
+
+    arquivo = models.ImageField(upload_to=_upload_to)
+
+    def __str__(self) -> str:
+        return str(self.arquivo)
+
+
 class Relatorio(models.Model):
     id_relatorio = models.AutoField(primary_key=True)
     evento = models.ForeignKey(
-        Evento, on_delete=models.CASCADE, related_name="relatorios"
+        Evento,
+        on_delete=models.SET_NULL,
+        related_name="relatorios",
+        null=True,
+        blank=True,
     )
     template = models.ForeignKey(
-        Template, on_delete=models.CASCADE, related_name="relatorios"
+        Template, on_delete=models.PROTECT, related_name="relatorios"
     )
     arquivo_gerado = models.CharField(max_length=255)
+    nome = models.CharField(max_length=150, blank=True, default="")
     status = models.CharField(max_length=50)
     metadados = models.JSONField(default=dict, blank=True)
     data_criacao = models.DateTimeField(auto_now_add=True)

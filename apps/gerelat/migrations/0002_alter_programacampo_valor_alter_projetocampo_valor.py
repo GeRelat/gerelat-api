@@ -4,20 +4,19 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('gerelat', '0001_initial'),
+        ("gerelat", "0001_initial"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='programacampo',
-            name='valor',
+            model_name="programacampo",
+            name="valor",
             field=models.JSONField(blank=True, default=dict),
         ),
         migrations.AlterField(
-            model_name='projetocampo',
-            name='valor',
+            model_name="projetocampo",
+            name="valor",
             field=models.JSONField(blank=True, default=dict),
         ),
     ]
