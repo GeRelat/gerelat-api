@@ -4,6 +4,7 @@ from typing import Any, cast
 from celery.result import AsyncResult
 from django.core.files.storage import default_storage
 from django.http import FileResponse
+from drf_spectacular.utils import OpenApiExample, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -177,6 +178,17 @@ class RelatorioViewSet(viewsets.ModelViewSet):
     queryset = Relatorio.objects.all()
     serializer_class = RelatorioSerializer
 
+    @extend_schema(
+        request=RelatorioGenerateRequestSerializer,
+        examples=[
+            OpenApiExample(
+                "Gerar relatório",
+                value={"template": 1},
+                request_only=True,
+            )
+        ],
+        description="Gera relatório a partir de um template.",
+    )
     @action(detail=False, methods=["post"], url_path="gerar")
     def gerar(self, request):
         serializer = RelatorioGenerateRequestSerializer(data=request.data)

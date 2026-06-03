@@ -152,10 +152,12 @@ class RelatorioGenerateRequestSerializer(serializers.Serializer):
         queryset=Evento.objects.all(),
         required=False,
         allow_null=True,
+        help_text="ID do evento (opcional)",
     )
     template = serializers.PrimaryKeyRelatedField(
         queryset=Template.objects.all(),
         required=True,
+        help_text="ID do template (obrigatório)",
     )
 
     def validate(self, attrs):
@@ -172,10 +174,5 @@ class RelatorioGenerateRequestSerializer(serializers.Serializer):
                 raise serializers.ValidationError(
                     "O template informado não pertence ao programa do evento."
                 )
-
-        if not evento and not template.projeto_id:
-            raise serializers.ValidationError(
-                "Informe um evento ou use um template vinculado a um projeto."
-            )
 
         return attrs
