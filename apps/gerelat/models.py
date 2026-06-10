@@ -100,8 +100,8 @@ class EquipeProjeto(models.Model):
 
 class ClasseEvento(models.Model):
     id_classe = models.AutoField(primary_key=True)
-    programa = models.ForeignKey(
-        Programa, on_delete=models.CASCADE, related_name="classes_evento"
+    projeto = models.ForeignKey(
+        Projeto, on_delete=models.CASCADE, related_name="classes_evento"
     )
     nome_classe = models.CharField(max_length=150)
 
