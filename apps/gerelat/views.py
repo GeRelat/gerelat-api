@@ -14,7 +14,9 @@ from .constants import DOCX_ALLOWED_MIME
 from .document_engine.utils import build_render_context, render_docx_from_template
 from .models import (
     Asset,
+    AssinaturaTemplate,
     ClasseEvento,
+    Cliente,
     EquipePrograma,
     EquipeProjeto,
     Evento,
@@ -28,7 +30,9 @@ from .models import (
 from .serializers import (
     AssetCreateRequestSerializer,
     AssetSerializer,
+    AssinaturaTemplateSerializer,
     ClasseEventoSerializer,
+    ClienteSerializer,
     EquipeProgramaSerializer,
     EquipeProjetoSerializer,
     EventoSerializer,
@@ -122,8 +126,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
         validated_data = serializer.validated_data
         arquivo_base = validated_data["modelo_arquivo_base"]
-        programa = validated_data["programa"]
-        projeto = validated_data.get("projeto")
+        projeto = validated_data["projeto"]
 
         arquivo_base.content_type = DOCX_ALLOWED_MIME
 
@@ -133,8 +136,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
         task = cast(Any, create_template).delay(
             stored_path=stored_path,
             nome_template=validated_data["nome_template"],
-            programa_id=programa.pk,
-            projeto_id=projeto.pk if projeto else None,
+            projeto_id=projeto.pk,
         )
 
         return Response(
@@ -160,6 +162,47 @@ class TemplateViewSet(viewsets.ModelViewSet):
             response_payload["error"] = str(async_result.result)
 
         return Response(response_payload, status=status.HTTP_200_OK)
+
+
+class AssinaturaTemplateViewSet(viewsets.ModelViewSet):
+    queryset = AssinaturaTemplate.objects.all()
+    serializer_class = AssinaturaTemplateSerializer
+
+    @extend_schema(
+        request=AssinaturaTemplateSerializer,
+        responses={201: AssinaturaTemplateSerializer},
+        examples=[
+            OpenApiExample(
+                "Assinatura com equipe do programa",
+                value={
+                    "template": 1,
+                    "equipe_programa": 1,
+                    "equipe_projeto": None,
+                },
+                request_only=True,
+            ),
+            OpenApiExample(
+                "Assinatura com equipe do projeto",
+                value={
+                    "template": 1,
+                    "equipe_programa": None,
+                    "equipe_projeto": 1,
+                },
+                request_only=True,
+            ),
+        ],
+        description=(
+            "Cria uma assinatura de template. Informe exatamente um dos campos: "
+            "equipe_programa ou equipe_projeto."
+        ),
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+
+class ClienteViewSet(viewsets.ModelViewSet):
+    queryset = Cliente.objects.all()
+    serializer_class = ClienteSerializer
 
 
 class TemplateClasseEventoViewSet(viewsets.ModelViewSet):

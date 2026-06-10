@@ -6,6 +6,7 @@ from . import views
 app_name = "gerelat"
 router = DefaultRouter()
 router.register(r"assets", views.AssetViewSet)
+router.register(r"clientes", views.ClienteViewSet)
 router.register(r"programas", views.ProgramaViewSet)
 router.register(r"equipes-programa", views.EquipeProgramaViewSet)
 router.register(r"projetos", views.ProjetoViewSet)
@@ -15,6 +16,7 @@ router.register(r"classes-evento", views.ClasseEventoViewSet)
 router.register(r"eventos", views.EventoViewSet)
 router.register(r"templates", views.TemplateViewSet)
 router.register(r"template-classes-evento", views.TemplateClasseEventoViewSet)
+router.register(r"assinaturas-template", views.AssinaturaTemplateViewSet)
 router.register(r"relatorios", views.RelatorioViewSet)
 
 urlpatterns = [

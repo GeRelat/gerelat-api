@@ -5,7 +5,9 @@ from rest_framework import serializers
 from .constants import DOCX_ALLOWED_MIME
 from .models import (
     Asset,
+    AssinaturaTemplate,
     ClasseEvento,
+    Cliente,
     EquipePrograma,
     EquipeProjeto,
     Evento,
@@ -94,14 +96,9 @@ class TemplateSerializer(serializers.ModelSerializer):
 class TemplateCreateRequestSerializer(serializers.Serializer):
     nome_template = serializers.CharField(max_length=150)
     modelo_arquivo_base = serializers.FileField()
-    programa = serializers.PrimaryKeyRelatedField(
-        queryset=Programa.objects.all(),
-        required=True,
-    )
     projeto = serializers.PrimaryKeyRelatedField(
         queryset=Projeto.objects.all(),
-        required=False,
-        allow_null=True,
+        required=True,
     )
 
     def validate_modelo_arquivo_base(self, value):
@@ -116,16 +113,34 @@ class TemplateCreateRequestSerializer(serializers.Serializer):
 
         return value
 
-    def validate(self, attrs):
-        programa = attrs["programa"]
-        projeto = attrs.get("projeto")
 
-        if projeto and projeto.programa_id != programa.id_programa:
+class AssinaturaTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AssinaturaTemplate
+        fields = "__all__"
+
+    def validate(self, attrs):
+        equipe_programa = attrs.get(
+            "equipe_programa",
+            getattr(self.instance, "equipe_programa", None),
+        )
+        equipe_projeto = attrs.get(
+            "equipe_projeto",
+            getattr(self.instance, "equipe_projeto", None),
+        )
+
+        if bool(equipe_programa) == bool(equipe_projeto):
             raise serializers.ValidationError(
-                "O projeto informado não pertence ao programa selecionado."
+                "Informe exatamente um dos campos: equipe_programa ou equipe_projeto."
             )
 
         return attrs
+
+
+class ClienteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Cliente
+        fields = "__all__"
 
 
 class TemplateClasseEventoSerializer(serializers.ModelSerializer):

@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 
 from .document_engine import validate_document_value
 from .enums import CampoTipo
@@ -198,6 +199,15 @@ class AssinaturaTemplate(models.Model):
         indexes = [
             models.Index(fields=["template", "equipe_programa"]),
             models.Index(fields=["template", "equipe_projeto"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(equipe_programa__isnull=False, equipe_projeto__isnull=True)
+                    | Q(equipe_programa__isnull=True, equipe_projeto__isnull=False)
+                ),
+                name="assinatura_template_exactly_one_equipe",
+            )
         ]
 
 
