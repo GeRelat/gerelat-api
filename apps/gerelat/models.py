@@ -5,6 +5,22 @@ from .enums import CampoTipo
 from .utils.uploads import asset_upload_to
 
 
+class Cliente(models.Model):
+    id_cliente = models.AutoField(primary_key=True)
+    nome = models.CharField(max_length=150)
+    cnpj = models.CharField(max_length=20)
+    nome_contato = models.CharField(max_length=150)
+    email_contato = models.EmailField(max_length=150)
+    fone_contato = models.CharField(max_length=20)
+    numero_contrato = models.CharField(max_length=100)
+    data_termino_contrato = models.DateField()
+    data_criacao = models.DateTimeField(auto_now_add=True)
+    ultima_atualizacao = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.nome
+
+
 class Programa(models.Model):
     id_programa = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=150)
