@@ -23,6 +23,13 @@ class Cliente(models.Model):
 
 class Programa(models.Model):
     id_programa = models.AutoField(primary_key=True)
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.PROTECT,
+        related_name="programas",
+        null=True,
+        blank=True,
+    )
     nome = models.CharField(max_length=150)
     lei_criacao = models.CharField(max_length=150)
     convenio_dados = models.CharField(max_length=150)
