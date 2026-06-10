@@ -193,6 +193,40 @@ class TemplateClasseEvento(models.Model):
         return f"{self.template.nome_template} - {self.classe_evento.nome_classe}"
 
 
+class AssinaturaTemplate(models.Model):
+    id_assinatura_template = models.AutoField(primary_key=True)
+    template = models.ForeignKey(
+        Template,
+        on_delete=models.CASCADE,
+        related_name="assinaturas_template",
+    )
+    equipe_programa = models.ForeignKey(
+        EquipePrograma,
+        on_delete=models.SET_NULL,
+        related_name="assinaturas_template",
+        null=True,
+        blank=True,
+    )
+    equipe_projeto = models.ForeignKey(
+        EquipeProjeto,
+        on_delete=models.SET_NULL,
+        related_name="assinaturas_template",
+        null=True,
+        blank=True,
+    )
+
+    def __str__(self):
+        return (
+            f"{self.template.nome_template} - Assinatura {self.id_assinatura_template}"
+        )
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["template", "equipe_programa"]),
+            models.Index(fields=["template", "equipe_projeto"]),
+        ]
+
+
 class Asset(models.Model):
     descricao = models.CharField(max_length=255, blank=True, default="")
 
