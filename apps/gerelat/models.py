@@ -142,6 +142,10 @@ class Template(models.Model):
     data_criacao = models.DateTimeField(auto_now_add=True)
     ultima_atualizacao = models.DateTimeField(auto_now=True)
 
+    is_locked = models.BooleanField(default=False)
+    locked_by = models.CharField(max_length=150, null=True, blank=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
         return self.nome_template
 
