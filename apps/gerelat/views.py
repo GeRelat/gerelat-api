@@ -19,7 +19,6 @@ from .models import (
     EquipeProjeto,
     Evento,
     Programa,
-    ProgramaCampo,
     Projeto,
     ProjetoCampo,
     Relatorio,
@@ -33,7 +32,6 @@ from .serializers import (
     EquipeProgramaSerializer,
     EquipeProjetoSerializer,
     EventoSerializer,
-    ProgramaCampoSerializer,
     ProgramaSerializer,
     ProjetoCampoSerializer,
     ProjetoSerializer,
@@ -60,11 +58,6 @@ class AssetViewSet(viewsets.ModelViewSet):
 class ProgramaViewSet(viewsets.ModelViewSet):
     queryset = Programa.objects.all()
     serializer_class = ProgramaSerializer
-
-
-class ProgramaCampoViewSet(viewsets.ModelViewSet):
-    queryset = ProgramaCampo.objects.all()
-    serializer_class = ProgramaCampoSerializer
 
 
 class EquipeProgramaViewSet(viewsets.ModelViewSet):

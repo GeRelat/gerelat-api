@@ -7,7 +7,6 @@ app_name = "gerelat"
 router = DefaultRouter()
 router.register(r"assets", views.AssetViewSet)
 router.register(r"programas", views.ProgramaViewSet)
-router.register(r"programa-campos", views.ProgramaCampoViewSet)
 router.register(r"equipes-programa", views.EquipeProgramaViewSet)
 router.register(r"projetos", views.ProjetoViewSet)
 router.register(r"projeto-campos", views.ProjetoCampoViewSet)

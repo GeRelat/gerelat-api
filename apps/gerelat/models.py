@@ -40,25 +40,6 @@ class Programa(models.Model):
         return self.nome
 
 
-class ProgramaCampo(models.Model):
-    id_campo = models.AutoField(primary_key=True)
-    programa = models.ForeignKey(
-        Programa, on_delete=models.CASCADE, related_name="campos_programa"
-    )
-    referencia = models.CharField(max_length=100)
-    descricao = models.CharField(max_length=255)
-    tipo = models.CharField(max_length=50, choices=CampoTipo.choices)
-    obrigatorio = models.BooleanField(default=False)
-    valor = models.JSONField(default=dict, blank=True)
-
-    def clean(self) -> None:
-        super().clean()
-        validate_document_value(self.tipo, self.valor)
-
-    def __str__(self):
-        return f"{self.programa.nome} - {self.referencia}"
-
-
 class EquipePrograma(models.Model):
     id_equipe_programa = models.AutoField(primary_key=True)
     programa = models.ForeignKey(

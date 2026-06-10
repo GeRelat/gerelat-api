@@ -10,7 +10,6 @@ from .models import (
     EquipeProjeto,
     Evento,
     Programa,
-    ProgramaCampo,
     Projeto,
     ProjetoCampo,
     Relatorio,
@@ -47,12 +46,6 @@ class AssetCreateRequestSerializer(serializers.Serializer):
 class ProgramaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Programa
-        fields = "__all__"
-
-
-class ProgramaCampoSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProgramaCampo
         fields = "__all__"
 
 
