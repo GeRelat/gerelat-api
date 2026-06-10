@@ -65,13 +65,11 @@ def create_template(
     *,
     stored_path: str,
     nome_template: str,
-    programa_id: int,
-    projeto_id: int | None,
+    projeto_id: int,
 ) -> dict[str, str | int | None]:
     try:
         template = Template.objects.create(
             nome_template=nome_template,
-            programa_id=programa_id,
             projeto_id=projeto_id,
             modelo_arquivo_base=stored_path,
         )

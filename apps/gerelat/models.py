@@ -1,12 +1,36 @@
 from django.db import models
+from django.db.models import Q
 
 from .document_engine import validate_document_value
 from .enums import CampoTipo
 from .utils.uploads import asset_upload_to
 
 
+class Cliente(models.Model):
+    id_cliente = models.AutoField(primary_key=True)
+    nome = models.CharField(max_length=150)
+    cnpj = models.CharField(max_length=20)
+    nome_contato = models.CharField(max_length=150)
+    email_contato = models.EmailField(max_length=150)
+    fone_contato = models.CharField(max_length=20)
+    numero_contrato = models.CharField(max_length=100)
+    data_termino_contrato = models.DateField()
+    data_criacao = models.DateTimeField(auto_now_add=True)
+    ultima_atualizacao = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.nome
+
+
 class Programa(models.Model):
     id_programa = models.AutoField(primary_key=True)
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.PROTECT,
+        related_name="programas",
+        null=True,
+        blank=True,
+    )
     nome = models.CharField(max_length=150)
     lei_criacao = models.CharField(max_length=150)
     convenio_dados = models.CharField(max_length=150)
@@ -15,25 +39,6 @@ class Programa(models.Model):
 
     def __str__(self):
         return self.nome
-
-
-class ProgramaCampo(models.Model):
-    id_campo = models.AutoField(primary_key=True)
-    programa = models.ForeignKey(
-        Programa, on_delete=models.CASCADE, related_name="campos_programa"
-    )
-    referencia = models.CharField(max_length=100)
-    descricao = models.CharField(max_length=255)
-    tipo = models.CharField(max_length=50, choices=CampoTipo.choices)
-    obrigatorio = models.BooleanField(default=False)
-    valor = models.JSONField(default=dict, blank=True)
-
-    def clean(self) -> None:
-        super().clean()
-        validate_document_value(self.tipo, self.valor)
-
-    def __str__(self):
-        return f"{self.programa.nome} - {self.referencia}"
 
 
 class EquipePrograma(models.Model):
@@ -96,8 +101,8 @@ class EquipeProjeto(models.Model):
 
 class ClasseEvento(models.Model):
     id_classe = models.AutoField(primary_key=True)
-    programa = models.ForeignKey(
-        Programa, on_delete=models.CASCADE, related_name="classes_evento"
+    projeto = models.ForeignKey(
+        Projeto, on_delete=models.CASCADE, related_name="classes_evento"
     )
     nome_classe = models.CharField(max_length=150)
 
@@ -125,24 +130,21 @@ class Evento(models.Model):
 
 class Template(models.Model):
     id_template = models.AutoField(primary_key=True)
-    programa = models.ForeignKey(
-        Programa,
+    projeto = models.ForeignKey(
+        Projeto,
         on_delete=models.CASCADE,
         related_name="templates",
         null=False,
         blank=False,
     )
-    projeto = models.ForeignKey(
-        Projeto,
-        on_delete=models.CASCADE,
-        related_name="templates",
-        null=True,
-        blank=True,
-    )
     nome_template = models.CharField(max_length=150)
     modelo_arquivo_base = models.CharField(max_length=255)
     data_criacao = models.DateTimeField(auto_now_add=True)
     ultima_atualizacao = models.DateTimeField(auto_now=True)
+
+    is_locked = models.BooleanField(default=False)
+    locked_by = models.CharField(max_length=150, null=True, blank=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.nome_template
@@ -168,6 +170,49 @@ class TemplateClasseEvento(models.Model):
 
     def __str__(self):
         return f"{self.template.nome_template} - {self.classe_evento.nome_classe}"
+
+
+class AssinaturaTemplate(models.Model):
+    id_assinatura_template = models.AutoField(primary_key=True)
+    template = models.ForeignKey(
+        Template,
+        on_delete=models.CASCADE,
+        related_name="assinaturas_template",
+    )
+    equipe_programa = models.ForeignKey(
+        EquipePrograma,
+        on_delete=models.SET_NULL,
+        related_name="assinaturas_template",
+        null=True,
+        blank=True,
+    )
+    equipe_projeto = models.ForeignKey(
+        EquipeProjeto,
+        on_delete=models.SET_NULL,
+        related_name="assinaturas_template",
+        null=True,
+        blank=True,
+    )
+
+    def __str__(self):
+        return (
+            f"{self.template.nome_template} - Assinatura {self.id_assinatura_template}"
+        )
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["template", "equipe_programa"]),
+            models.Index(fields=["template", "equipe_projeto"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(equipe_programa__isnull=False, equipe_projeto__isnull=True)
+                    | Q(equipe_programa__isnull=True, equipe_projeto__isnull=False)
+                ),
+                name="assinatura_template_exactly_one_equipe",
+            )
+        ]
 
 
 class Asset(models.Model):
