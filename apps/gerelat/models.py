@@ -129,19 +129,12 @@ class Evento(models.Model):
 
 class Template(models.Model):
     id_template = models.AutoField(primary_key=True)
-    programa = models.ForeignKey(
-        Programa,
-        on_delete=models.CASCADE,
-        related_name="templates",
-        null=False,
-        blank=False,
-    )
     projeto = models.ForeignKey(
         Projeto,
         on_delete=models.CASCADE,
         related_name="templates",
-        null=True,
-        blank=True,
+        null=False,
+        blank=False,
     )
     nome_template = models.CharField(max_length=150)
     modelo_arquivo_base = models.CharField(max_length=255)
