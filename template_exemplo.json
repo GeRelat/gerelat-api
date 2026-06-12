@@ -1,0 +1,145 @@
+{
+  "type": "doc",
+  "content": [
+    {
+      "type": "heading",
+      "attrs": { "level": 1 },
+      "content": [{ "type": "text", "text": "RELATÓRIO DE ATIVIDADE" }]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        { "type": "text", "text": "Contrato nº " },
+        { "type": "variable", "attrs": { "ref": "numero_contrato" } },
+        { "type": "text", "text": " — Parceria com " },
+        { "type": "variable", "attrs": { "ref": "nome_parceira" } }
+      ]
+    },
+    {
+      "type": "heading",
+      "attrs": { "level": 2 },
+      "content": [{ "type": "text", "text": "1. Identificação da Atividade" }]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        { "type": "text", "text": "Atividade: ", "marks": [{ "type": "strong" }] },
+        { "type": "variable", "attrs": { "ref": "nome_evento" } }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        { "type": "text", "text": "Data: ", "marks": [{ "type": "strong" }] },
+        { "type": "variable", "attrs": { "ref": "data_evento" } }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        { "type": "text", "text": "Local: ", "marks": [{ "type": "strong" }] },
+        { "type": "variable", "attrs": { "ref": "local_evento" } },
+        { "type": "text", "text": " — " },
+        { "type": "variable", "attrs": { "ref": "endereco_evento" } }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        { "type": "text", "text": "Carga horária: ", "marks": [{ "type": "strong" }] },
+        { "type": "variable", "attrs": { "ref": "carga_horaria" } }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        { "type": "text", "text": "Total de participantes: ", "marks": [{ "type": "strong" }] },
+        { "type": "variable", "attrs": { "ref": "total_participantes" } }
+      ]
+    },
+    {
+      "type": "heading",
+      "attrs": { "level": 2 },
+      "content": [{ "type": "text", "text": "2. Objetivo" }]
+    },
+    {
+      "type": "custom_text",
+      "attrs": { "label": "objetivo_evento" },
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [{ "type": "text", "text": "Conteúdo do objetivo será preenchido pela variável objetivo_evento." }]
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "attrs": { "level": 2 },
+      "content": [{ "type": "text", "text": "3. Metodologia" }]
+    },
+    {
+      "type": "custom_text",
+      "attrs": { "label": "metodologia" },
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [{ "type": "text", "text": "Conteúdo da metodologia será preenchido pela variável metodologia." }]
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "attrs": { "level": 2 },
+      "content": [{ "type": "text", "text": "4. Lista de Participantes" }]
+    },
+    {
+      "type": "table_ref",
+      "attrs": {
+        "ref": "lista_participantes",
+        "columns": "[\"nome\",\"cpf\",\"faixa_etaria\",\"presenca\"]",
+        "caption": "Participantes da atividade"
+      }
+    },
+    {
+      "type": "heading",
+      "attrs": { "level": 2 },
+      "content": [{ "type": "text", "text": "5. Equipe de Execução" }]
+    },
+    {
+      "type": "table_ref",
+      "attrs": {
+        "ref": "equipe_execucao",
+        "columns": "[\"nome\",\"cargo\",\"carga\"]",
+        "caption": "Equipe responsável pela execução"
+      }
+    },
+    {
+      "type": "heading",
+      "attrs": { "level": 2 },
+      "content": [{ "type": "text", "text": "6. Conclusão" }]
+    },
+    {
+      "type": "custom_text",
+      "attrs": { "label": "conclusao" },
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [{ "type": "text", "text": "Conteúdo da conclusão será preenchido pela variável conclusao." }]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [{ "type": "text", "text": " " }]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        { "type": "text", "text": "Coordenador: ", "marks": [{ "type": "strong" }] },
+        { "type": "variable", "attrs": { "ref": "nome_coordenador" } },
+        { "type": "text", "text": " — " },
+        { "type": "variable", "attrs": { "ref": "cargo_coordenador" } }
+      ]
+    }
+  ]
+}
