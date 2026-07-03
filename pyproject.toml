@@ -6,20 +6,28 @@ readme = "README.md"
 requires-python = ">=3.12"
 
 dependencies = [
+    "boto3>=1.40.59",
+    "celery[redis]>=5.6.0",
     "django>=6.0.4",
     "django-cors-headers>=4.9.0",
+    "django-storages>=1.14.6",
     "djangorestframework>=3.17.1",
     "djangorestframework-simplejwt>=5.5.1",
     "docxtpl>=0.20.2",
     "drf-spectacular>=0.29.0",
+    "flower>=2.0.1",
     "granian>=2.7.3",
+    "pillow>=12.2.0",
     "psycopg[binary]>=3.3.3",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "ruff>=0.15.9",
-    "pyright>=1.1.408"
+    "pyright>=1.1.408",
+    "django-stubs>=6.0.3",
+    "django-stubs-ext>=6.0.3",
+    "djangorestframework-stubs>=3.16.9",
 ]
 
 [tool.ruff]
@@ -30,6 +38,9 @@ exclude = ["__pycache__", ".venv", ".pytest_cache", ".ruff_cache", "*.md"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 fixable = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["E501"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
