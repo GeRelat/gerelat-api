@@ -27,6 +27,7 @@ class AssetSerializer(serializers.ModelSerializer):
 
 
 class AssetCreateRequestSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
     arquivo = serializers.ImageField()
     descricao = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
@@ -100,6 +101,27 @@ class TemplateCreateRequestSerializer(serializers.Serializer):
         queryset=Projeto.objects.all(),
         required=True,
     )
+
+    def validate_modelo_arquivo_base(self, value):
+        if not value.name.lower().endswith(".docx"):
+            raise serializers.ValidationError("Envie o template no formato .docx")
+
+        detected_content_type = (
+            getattr(value, "content_type", None) or mimetypes.guess_type(value.name)[0]
+        )
+        if detected_content_type != DOCX_ALLOWED_MIME:
+            raise serializers.ValidationError("Tipo de arquivo invalido para upload.")
+
+        return value
+
+
+class TemplateUpdateRequestSerializer(serializers.Serializer):
+    nome_template = serializers.CharField(max_length=150, required=False)
+    projeto = serializers.PrimaryKeyRelatedField(
+        queryset=Projeto.objects.all(),
+        required=False,
+    )
+    modelo_arquivo_base = serializers.FileField(required=False)
 
     def validate_modelo_arquivo_base(self, value):
         if not value.name.lower().endswith(".docx"):

@@ -1,5 +1,4 @@
 import uuid
-from typing import Any, cast
 
 from celery.result import AsyncResult
 from django.core.files.storage import default_storage
@@ -47,8 +46,9 @@ from .serializers import (
     TemplateCreateRequestSerializer,
     TemplateFromJsonSerializer,
     TemplateSerializer,
+    TemplateUpdateRequestSerializer,
 )
-from .tasks import create_template, generate_relatorio, generate_relatorio_sync
+from .tasks import generate_relatorio, generate_relatorio_sync
 
 
 class AssetViewSet(viewsets.ModelViewSet):
@@ -135,21 +135,50 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
         object_name = f"{uuid.uuid4()}.docx"
         stored_path = default_storage.save(object_name, arquivo_base)
-
-        task = cast(Any, create_template).delay(
-            stored_path=stored_path,
+        template = Template.objects.create(
             nome_template=validated_data["nome_template"],
             projeto_id=projeto.pk,
+            modelo_arquivo_base=stored_path,
         )
 
         return Response(
-            {
-                "detail": "Solicitação recebida e enviada para processamento.",
-                "task_id": task.id,
-                "task_status": "PENDING",
-            },
-            status=status.HTTP_202_ACCEPTED,
+            TemplateSerializer(template).data,
+            status=status.HTTP_201_CREATED,
         )
+
+    def partial_update(self, request, *args, **kwargs):
+        template = self.get_object()
+        serializer = TemplateUpdateRequestSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        validated_data = serializer.validated_data
+        updated_fields: list[str] = []
+
+        if "nome_template" in validated_data:
+            template.nome_template = validated_data["nome_template"]
+            updated_fields.append("nome_template")
+
+        if "projeto" in validated_data:
+            template.projeto = validated_data["projeto"]
+            updated_fields.append("projeto")
+
+        arquivo_base = validated_data.get("modelo_arquivo_base")
+        if arquivo_base is not None:
+            arquivo_base.content_type = DOCX_ALLOWED_MIME
+            object_name = f"{uuid.uuid4()}.docx"
+            stored_path = default_storage.save(object_name, arquivo_base)
+            old_path = template.modelo_arquivo_base
+            template.modelo_arquivo_base = stored_path
+            updated_fields.append("modelo_arquivo_base")
+
+            if old_path and default_storage.exists(old_path):
+                default_storage.delete(old_path)
+
+        if updated_fields:
+            updated_fields.append("ultima_atualizacao")
+            template.save(update_fields=updated_fields)
+
+        return Response(TemplateSerializer(template).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="preview")
     def preview(self, request, pk=None):
@@ -335,12 +364,6 @@ class RelatorioViewSet(viewsets.ModelViewSet):
         relatorio = self.get_object()
         template = relatorio.template
         variables = relatorio.metadados or {}
-
-        if not variables:
-            return Response(
-                {"detail": "Metadados do relatório não encontrados."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
         if relatorio.documento_json:
             # ── Documento já resolvido e editado pelo usuário ──
