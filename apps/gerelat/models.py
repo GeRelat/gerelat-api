@@ -142,6 +142,8 @@ class Template(models.Model):
     data_criacao = models.DateTimeField(auto_now_add=True)
     ultima_atualizacao = models.DateTimeField(auto_now=True)
 
+    modelo_json = models.JSONField(default=dict, blank=True)
+
     is_locked = models.BooleanField(default=False)
     locked_by = models.CharField(max_length=150, null=True, blank=True)
     locked_at = models.DateTimeField(null=True, blank=True)
@@ -243,6 +245,7 @@ class Relatorio(models.Model):
     nome = models.CharField(max_length=150, blank=True, default="")
     status = models.CharField(max_length=50)
     metadados = models.JSONField(default=dict, blank=True)
+    documento_json = models.JSONField(default=dict, blank=True)
     data_criacao = models.DateTimeField(auto_now_add=True)
     ultima_atualizacao = models.DateTimeField(auto_now=True)
 

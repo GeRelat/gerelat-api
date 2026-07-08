@@ -8,7 +8,6 @@ services:
             interval: 10s
             timeout: 5s
             retries: 5
-
     db:
         image: postgres:16-alpine
         volumes:
@@ -35,9 +34,7 @@ services:
             - .:/app
             - /app/.venv
         env_file:
-            - .env.dev
-        environment:
-            DJANGO_DB_HOST: db
+            - .env
         depends_on:
             redis:
                 condition: service_healthy
@@ -51,9 +48,7 @@ services:
             - .:/app
             - /app/.venv
         env_file:
-            - .env.dev
-        environment:
-            DJANGO_DB_HOST: db
+            - .env
         depends_on:
             redis:
                 condition: service_healthy
@@ -69,9 +64,7 @@ services:
             - .:/app
             - /app/.venv
         env_file:
-            - .env.dev
-        environment:
-            DJANGO_DB_HOST: db
+            - .env
         depends_on:
             redis:
                 condition: service_healthy

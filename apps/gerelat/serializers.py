@@ -155,7 +155,26 @@ class RelatorioSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class TemplateFromJsonSerializer(serializers.Serializer):
+    nome_template = serializers.CharField(max_length=150)
+    projeto = serializers.PrimaryKeyRelatedField(queryset=Projeto.objects.all())
+    modelo_json = serializers.JSONField()
+
+    def validate_modelo_json(self, value):
+        if not isinstance(value, dict) or value.get("type") != "doc":
+            raise serializers.ValidationError(
+                "modelo_json deve ser um documento ProseMirror válido com type='doc'."
+            )
+        return value
+
+
 class RelatorioGenerateRequestSerializer(serializers.Serializer):
+    nome = serializers.CharField(
+        max_length=150,
+        required=False,
+        allow_blank=True,
+        help_text="Nome opcional para o relatório (substitui o nome do template)",
+    )
     evento = serializers.PrimaryKeyRelatedField(
         queryset=Evento.objects.all(),
         required=False,
@@ -166,6 +185,11 @@ class RelatorioGenerateRequestSerializer(serializers.Serializer):
         queryset=Template.objects.all(),
         required=True,
         help_text="ID do template (obrigatório)",
+    )
+    documento_json = serializers.JSONField(
+        required=False,
+        allow_null=True,
+        help_text="Documento ProseMirror já resolvido e editado pelo usuário (opcional)",
     )
 
     def validate(self, attrs):
@@ -178,9 +202,12 @@ class RelatorioGenerateRequestSerializer(serializers.Serializer):
                     "O template informado não pertence ao projeto do evento."
                 )
 
-            if template.programa_id != evento.projeto.programa_id:
-                raise serializers.ValidationError(
-                    "O template informado não pertence ao programa do evento."
-                )
+        documento_json = attrs.get("documento_json")
+        if documento_json is not None and (
+            not isinstance(documento_json, dict) or documento_json.get("type") != "doc"
+        ):
+            raise serializers.ValidationError(
+                "documento_json deve ser um documento ProseMirror válido."
+            )
 
         return attrs
