@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
     DJANGO_ENV=prod \
-    DJANGO_SETTINGS_MODULE=config.settings.prod \
+    DJANGO_SETTINGS_MODULE=config.settings \
     PYTHONHASHSEED=random
 
 WORKDIR /app

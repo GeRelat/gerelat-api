@@ -13,13 +13,13 @@ uv venv
 #### Produção + desenvolvimento:
 
 ```bash
-uv sync --all-extras
+uv sync
 ```
 
 #### Apenas produção:
 
 ```bash
-uv sync
+uv sync --no-dev
 ```
 
 ---
@@ -66,12 +66,12 @@ uv remove <pacote>
 
 ```bash
 uv lock --upgrade
-uv sync --all-extras
+uv sync
 ```
 
 ---
 
-### 6. Copiar .env.example para .env.dev
+### 6. Copiar .env.example para .env
 
 
 ### 7. Rodar projeto Django (PostgreSQL necessário)
@@ -85,6 +85,23 @@ ou
 uv run granian config.asgi:application --interface asginl
 ```
 
+---
+
+### 7.1. Migrations
+
+Criar migrations:
+
+```bash
+uv run manage.py makemigrations
+```
+
+Aplicar migrations:
+
+```bash
+uv run manage.py migrate
+```
+
+---
 
 ### 8. Docker com Django e PostgreSQL
 
@@ -111,6 +128,7 @@ docker compose up -d db
 - API: http://127.0.0.1:8000/
 - Documentação Swagger: http://127.0.0.1:8000/docs/
 - Healthcheck: http://127.0.0.1:8000/health/
+- Flower (monitoramento Celery): http://127.0.0.1:5555/
 
 
 #### 8.3 Parar os containers
@@ -129,6 +147,12 @@ Para parar somente o banco (PostgreSQL):
 
 ```bash
 docker compose stop db
+```
+
+Para parar os serviços assíncronos (Celery/Redis/Flower):
+
+```bash
+docker compose stop worker redis flower
 ```
 
 ---

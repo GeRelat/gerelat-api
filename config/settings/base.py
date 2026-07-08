@@ -58,7 +58,9 @@ def env_list(var_name: str, default: str = "") -> list[str]:
 
 _load_env_layers()
 
-VERSION = "1.0.0"
+S3_ENABLED = os.getenv("S3_ENABLED", "false").lower() == "true"
+
+VERSION = "1.1.0"
 
 SECRET_KEY = os.getenv(
     "DJANGO_SECRET_KEY",
@@ -83,6 +85,9 @@ INSTALLED_APPS = [
     "apps.gerelat",
     "apps.accounts",
 ]
+
+if S3_ENABLED:
+    INSTALLED_APPS.append("storages")
 
 AUTH_USER_MODEL = "accounts.User"
 
@@ -130,25 +135,23 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-db_engine = os.getenv("DJANGO_DB_ENGINE", "django.db.backends.postgresql")
-db_name = os.getenv("DJANGO_DB_NAME", "gerelat")
+_db_engine = os.getenv("DJANGO_DB_ENGINE", "django.db.backends.postgresql")
+_db_sslmode = os.getenv("DJANGO_DB_SSLMODE", "")
 
-DATABASES = {
-    "default": {
-        "ENGINE": db_engine,
-        "NAME": db_name,
-    }
+_db_config: dict[str, object] = {
+    "ENGINE": _db_engine,
+    "NAME": os.getenv("DJANGO_DB_NAME", "gerelat"),
 }
 
-if db_engine != "django.db.backends.sqlite3":
-    DATABASES["default"].update(
-        {
-            "USER": os.getenv("DJANGO_DB_USER", ""),
-            "PASSWORD": os.getenv("DJANGO_DB_PASSWORD", ""),
-            "HOST": os.getenv("DJANGO_DB_HOST", "localhost"),
-            "PORT": os.getenv("DJANGO_DB_PORT", "5432"),
-        }
-    )
+if _db_engine != "django.db.backends.sqlite3":
+    _db_config["USER"] = os.getenv("DJANGO_DB_USER", "")
+    _db_config["PASSWORD"] = os.getenv("DJANGO_DB_PASSWORD", "")
+    _db_config["HOST"] = os.getenv("DJANGO_DB_HOST", "localhost")
+    _db_config["PORT"] = os.getenv("DJANGO_DB_PORT", "5432")
+    if _db_sslmode:
+        _db_config["OPTIONS"] = {"sslmode": _db_sslmode}
+
+DATABASES = {"default": _db_config}
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -177,5 +180,47 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "")
+S3_REGION_NAME = os.getenv("S3_REGION_NAME", "")
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "")
+S3_PUBLIC_BASE_URL = os.getenv("S3_PUBLIC_BASE_URL", "")
+S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "")
+S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "")
+
+if S3_ENABLED:
+    AWS_S3_ENDPOINT_URL = S3_ENDPOINT_URL
+    AWS_S3_REGION_NAME = S3_REGION_NAME
+    AWS_STORAGE_BUCKET_NAME = S3_BUCKET_NAME
+    AWS_ACCESS_KEY_ID = S3_ACCESS_KEY
+    AWS_SECRET_ACCESS_KEY = S3_SECRET_KEY
+    AWS_DEFAULT_ACL = None
+    AWS_QUERYSTRING_AUTH = False
+    AWS_S3_SIGNATURE_VERSION = "s3v4"
+    AWS_S3_ADDRESSING_STYLE = "path"
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+            "OPTIONS": {"bucket_name": AWS_STORAGE_BUCKET_NAME},
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+
+    if S3_PUBLIC_BASE_URL:
+        MEDIA_URL = f"{S3_PUBLIC_BASE_URL.rstrip('/')}/"
+
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
