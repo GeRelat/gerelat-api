@@ -305,7 +305,12 @@ class RelatorioViewSet(viewsets.ModelViewSet):
         examples=[
             OpenApiExample(
                 "Gerar relatório",
-                value={"template": 1},
+                value={
+                    "template": 1,
+                    "evento": 2,
+                    "documento_json": {"type": "doc", "content": []},
+                    "nome": "Relatório Financeiro Q2",
+                },
                 request_only=True,
             )
         ],
