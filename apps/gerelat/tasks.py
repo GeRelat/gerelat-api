@@ -12,6 +12,7 @@ def _do_generate_relatorio(
     evento_id: int | None,
     template_id: int,
     documento_json: dict | None = None,
+    nome: str | None = None,
     task_id: str | None = None,
 ) -> dict:
     template = Template.objects.get(id_template=template_id)
@@ -33,7 +34,7 @@ def _do_generate_relatorio(
     relatorio = Relatorio.objects.create(
         evento_id=evento.id_evento if evento else None,
         template_id=template_id,
-        nome=template.nome_template,
+        nome=nome or template.nome_template,
         arquivo_gerado="",
         status="SUCCESS",
         metadados=context,
@@ -55,34 +56,18 @@ def generate_relatorio(
     evento_id: int | None,
     template_id: int,
     documento_json: dict | None = None,
+    nome: str | None = None,
 ) -> dict:
     try:
         return _do_generate_relatorio(
             evento_id=evento_id,
             template_id=template_id,
             documento_json=documento_json,
+            nome=nome,
             task_id=self.request.id,
         )
     except Exception:
         logger.exception("Falha ao gerar relatório.")
-        raise
-
-
-def generate_relatorio_sync(
-    *,
-    evento_id: int | None,
-    template_id: int,
-    documento_json: dict | None = None,
-) -> dict:
-    """Versão síncrona — não requer Celery."""
-    try:
-        return _do_generate_relatorio(
-            evento_id=evento_id,
-            template_id=template_id,
-            documento_json=documento_json,
-        )
-    except Exception:
-        logger.exception("Falha ao gerar relatório (sync).")
         raise
 
 

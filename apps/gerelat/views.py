@@ -48,7 +48,7 @@ from .serializers import (
     TemplateFromJsonSerializer,
     TemplateSerializer,
 )
-from .tasks import create_template, generate_relatorio, generate_relatorio_sync
+from .tasks import create_template, generate_relatorio
 
 
 class AssetViewSet(viewsets.ModelViewSet):
@@ -319,16 +319,23 @@ class RelatorioViewSet(viewsets.ModelViewSet):
         evento = serializer.validated_data.get("evento")
         template = serializer.validated_data["template"]
         documento_json = serializer.validated_data.get("documento_json") or None
+        nome = serializer.validated_data.get("nome")
 
-        # Executa sincronamente — não requer Celery worker rodando
-        result = generate_relatorio_sync(
+        task = cast(Any, generate_relatorio).delay(
             evento_id=evento.id_evento if evento else None,
             template_id=template.id_template,
             documento_json=documento_json,
+            nome=nome,
         )
 
-        relatorio = Relatorio.objects.get(id_relatorio=result["id_relatorio"])
-        return Response(RelatorioSerializer(relatorio).data, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "detail": "Solicitação recebida e enviada para processamento.",
+                "task_id": task.id,
+                "task_status": "PENDING",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
 
     @action(detail=True, methods=["get"], url_path="download")
     def download(self, request, pk=None):

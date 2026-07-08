@@ -169,6 +169,12 @@ class TemplateFromJsonSerializer(serializers.Serializer):
 
 
 class RelatorioGenerateRequestSerializer(serializers.Serializer):
+    nome = serializers.CharField(
+        max_length=150,
+        required=False,
+        allow_blank=True,
+        help_text="Nome opcional para o relatório (substitui o nome do template)",
+    )
     evento = serializers.PrimaryKeyRelatedField(
         queryset=Evento.objects.all(),
         required=False,
