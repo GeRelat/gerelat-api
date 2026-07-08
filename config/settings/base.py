@@ -60,7 +60,7 @@ _load_env_layers()
 
 S3_ENABLED = os.getenv("S3_ENABLED", "false").lower() == "true"
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 SECRET_KEY = os.getenv(
     "DJANGO_SECRET_KEY",
