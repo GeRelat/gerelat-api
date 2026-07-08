@@ -71,7 +71,7 @@ uv sync
 
 ---
 
-### 6. Copiar .env.example para .env.dev
+### 6. Copiar .env.example para .env
 
 
 ### 7. Rodar projeto Django (PostgreSQL necessário)

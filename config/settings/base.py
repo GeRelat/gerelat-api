@@ -135,25 +135,23 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-db_engine = os.getenv("DJANGO_DB_ENGINE", "django.db.backends.postgresql")
-db_name = os.getenv("DJANGO_DB_NAME", "gerelat")
+_db_engine = os.getenv("DJANGO_DB_ENGINE", "django.db.backends.postgresql")
+_db_sslmode = os.getenv("DJANGO_DB_SSLMODE", "")
 
-DATABASES = {
-    "default": {
-        "ENGINE": db_engine,
-        "NAME": db_name,
-    }
+_db_config: dict[str, object] = {
+    "ENGINE": _db_engine,
+    "NAME": os.getenv("DJANGO_DB_NAME", "gerelat"),
 }
 
-if db_engine != "django.db.backends.sqlite3":
-    DATABASES["default"].update(
-        {
-            "USER": os.getenv("DJANGO_DB_USER", ""),
-            "PASSWORD": os.getenv("DJANGO_DB_PASSWORD", ""),
-            "HOST": os.getenv("DJANGO_DB_HOST", "localhost"),
-            "PORT": os.getenv("DJANGO_DB_PORT", "5432"),
-        }
-    )
+if _db_engine != "django.db.backends.sqlite3":
+    _db_config["USER"] = os.getenv("DJANGO_DB_USER", "")
+    _db_config["PASSWORD"] = os.getenv("DJANGO_DB_PASSWORD", "")
+    _db_config["HOST"] = os.getenv("DJANGO_DB_HOST", "localhost")
+    _db_config["PORT"] = os.getenv("DJANGO_DB_PORT", "5432")
+    if _db_sslmode:
+        _db_config["OPTIONS"] = {"sslmode": _db_sslmode}
+
+DATABASES = {"default": _db_config}
 
 AUTH_PASSWORD_VALIDATORS = [
     {
