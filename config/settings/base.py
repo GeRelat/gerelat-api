@@ -58,9 +58,11 @@ def env_list(var_name: str, default: str = "") -> list[str]:
 
 _load_env_layers()
 
+ENV = _normalize_env_name(os.getenv("DJANGO_ENV", "dev"))
+
 S3_ENABLED = os.getenv("S3_ENABLED", "false").lower() == "true"
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 SECRET_KEY = os.getenv(
     "DJANGO_SECRET_KEY",
