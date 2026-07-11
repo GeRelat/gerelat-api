@@ -15,6 +15,7 @@ from .models import (
     Relatorio,
     Template,
     TemplateClasseEvento,
+    AuditLog,
 )
 
 # ---- Inlines ---=-----=--------------------------------=
@@ -79,12 +80,12 @@ class ProgramaAdmin(admin.ModelAdmin):
     search_fields = ('nome', 'lei_criacao', 'convenio_dados')
     inlines       = [ProgramaCampoInline, EquipeProgramaInline]
 
-@admin.register(ProgramaCampo)
-class ProgramaCampoAdmin(admin.ModelAdmin):
-    list_display  = ('id_campo', 'programa', 'referencia', 'tipo', 'obrigatorio')
-    list_editable = ('obrigatorio',)
-    list_filter   = ('tipo', 'obrigatorio', 'programa')
-    search_fields = ('referencia', 'descricao')
+#@admin.register(ProgramaCampo)
+#class ProgramaCampoAdmin(admin.ModelAdmin):
+ #   list_display  = ('id_campo', 'programa', 'referencia', 'tipo', 'obrigatorio')
+  #  list_editable = ('obrigatorio',)
+   # list_filter   = ('tipo', 'obrigatorio', 'programa')
+    #search_fields = ('referencia', 'descricao')
 
 @admin.register(EquipePrograma)
 class EquipeProgramaAdmin(admin.ModelAdmin):
@@ -144,3 +145,16 @@ class RelatorioAdmin(admin.ModelAdmin):
     search_fields = ('arquivo_gerado', 'status')
 
     actions = [exportar_para_docx]
+
+@admin.register(AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    list_display = ('acao','endpoint','usuario','data_hora')
+    list_filter = ('acao','data_hora')
+    search_fields = ('endpoint','usuario__username')
+
+    readonly_fields = ('acao','endpoint','usuario','data_hora')
+
+@admin.register(Relatorio)
+class RelatorioAdmin(admin.ModelAdmin):
+    list_display = ('id','status','is_deleted')
+    list_filter = ('status','is_deleted')
