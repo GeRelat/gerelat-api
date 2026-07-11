@@ -1,4 +1,20 @@
 from django.db import models
+from django.conf import settings
+from django.utils import timezone
+
+class AuditLog(models.Model):
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    acao = models.CharField(max_length=10)
+    endpoint = models.CharField(max_length=255)
+    data_hora = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-data_hora']
+
+    def __str__(self):
+        return f"{self.acao} em {self.endpoint} por {self.usuario}"
 
 
 class Programa(models.Model):
@@ -174,3 +190,35 @@ class Relatorio(models.Model):
 
     def __str__(self):
         return f"Relatorio {self.id_relatorio} - {self.status}"
+    
+    bloqueado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='relatorios_editando'
+    )
+    bloqueado_em = models.DateTimeField(null=True, blank=True)
+
+    is_deleted = models.BooleanField(default=False)
+
+class HistoricoRelatorio(models.Model):
+    relatorio = models.ForeignKey(Relatorio, on_delete=models.CASCADE, related_name='historicos')
+    modificado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.SET_NULL, 
+        null=True
+    )
+    data_modificacao = models.DateTimeField(auto_now_add=True)
+    metadados_antigos = models.JSONField(blank=True, null=True)
+
+    class Meta:
+        verbose_name = "Histórico de Relatório"
+        verbose_name_plural = "Históricos de Relatórios"
+        ordering = ['-data_modificacao'] # Mostra os mais recentes primeiro
+
+    def __str__(self):
+        return f"Versão de {self.data_modificacao.strftime('%d/%m/%Y %H:%M')} - {self.relatorio}"
+    
+
+

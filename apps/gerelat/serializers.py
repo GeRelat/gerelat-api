@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from .models import Relatorio
 
 from .models import (
     ClasseEvento,
@@ -79,3 +80,13 @@ class RelatorioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Relatorio
         fields = "__all__"
+
+        read_only_fields = [
+            'id_relatorio',
+            'status',
+            'arqquivo_gerado',
+            'bloqueado_por',
+            'bloqueado_em',
+            'evento'
+
+        ]
