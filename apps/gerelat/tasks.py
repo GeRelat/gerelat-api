@@ -15,7 +15,7 @@ def _do_generate_relatorio(
     nome: str | None = None,
     task_id: str | None = None,
 ) -> dict:
-    template = Template.objects.get(id_template=template_id)
+    template = Template.objects.get(id=template_id)
 
     evento = None
     projeto_id = template.projeto_id
@@ -41,7 +41,10 @@ def _do_generate_relatorio(
         documento_json=documento_json or {},
     )
 
-    return {"task_id": task_id, "id_relatorio": relatorio.id}
+    return {
+        "type": Relatorio.__name__,
+        "id": relatorio.id,
+    }
 
 
 @shared_task(
@@ -92,9 +95,8 @@ def create_template(
         )
 
         return {
+            "type": Template.__name__,
             "id": template.id,
-            "nome": template.nome,
-            "modelo_json": template.modelo_json,
         }
     except Exception:
         logger.exception("Falha ao criar template.")

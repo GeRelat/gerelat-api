@@ -246,33 +246,6 @@ class TemplateViewSet(viewsets.ModelViewSet):
             )
         return Response({"modelo_json": pm_json})
 
-    @extend_schema(
-        parameters=[
-            OpenApiParameter(
-                name="task_id",
-                description="ID da task do Celery",
-                required=True,
-                type=OpenApiTypes.UUID,
-                location=OpenApiParameter.PATH,
-            )
-        ],
-        responses={200: TaskStatusSerializer},
-    )
-    @action(detail=False, methods=["get"], url_path=r"tasks/(?P<task_id>[^/.]+)")
-    def task_status(self, request, task_id=None):
-        async_result = AsyncResult(task_id)
-        response_payload = {
-            "task_id": task_id,
-            "task_status": async_result.state,
-        }
-
-        if async_result.state == "SUCCESS":
-            response_payload["result"] = async_result.result
-        elif async_result.state == "FAILURE":
-            response_payload["error"] = str(async_result.result)
-
-        return Response(response_payload, status=status.HTTP_200_OK)
-
 
 class AssinaturaTemplateViewSet(viewsets.ModelViewSet):
     queryset = AssinaturaTemplate.objects.all()
@@ -398,3 +371,34 @@ class RelatorioViewSet(viewsets.ModelViewSet):
         response = FileResponse(output_buffer, content_type=DOCX_ALLOWED_MIME)
         response["Content-Disposition"] = content_disp
         return response
+
+
+class TaskViewSet(viewsets.ViewSet):
+    """Endpoint para consultar o status de tasks do Celery."""
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="task_id",
+                description="ID da task do Celery",
+                required=True,
+                type=OpenApiTypes.UUID,
+                location=OpenApiParameter.PATH,
+            )
+        ],
+        responses={200: TaskStatusSerializer},
+    )
+    @action(detail=False, methods=["get"], url_path=r"(?P<task_id>[^/.]+)")
+    def task_status(self, request, task_id=None):
+        async_result = AsyncResult(task_id)
+        response_payload = {
+            "task_id": task_id,
+            "task_status": async_result.state,
+        }
+
+        if async_result.state == "SUCCESS":
+            response_payload["result"] = async_result.result
+        elif async_result.state == "FAILURE":
+            response_payload["error"] = str(async_result.result)
+
+        return Response(response_payload, status=status.HTTP_200_OK)
