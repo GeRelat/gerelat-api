@@ -89,6 +89,7 @@ class TemplateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Template
         fields = [
+            "id",
             "nome",
             "projeto",
             "ultima_atualizacao",
