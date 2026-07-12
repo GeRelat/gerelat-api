@@ -7,7 +7,7 @@ from .utils.uploads import asset_upload_to
 
 
 class Cliente(models.Model):
-    id_cliente = models.AutoField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=150)
     cnpj = models.CharField(max_length=20)
     nome_contato = models.CharField(max_length=150)
@@ -23,7 +23,7 @@ class Cliente(models.Model):
 
 
 class Programa(models.Model):
-    id_programa = models.AutoField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     cliente = models.ForeignKey(
         Cliente,
         on_delete=models.PROTECT,
@@ -42,7 +42,7 @@ class Programa(models.Model):
 
 
 class EquipePrograma(models.Model):
-    id_equipe_programa = models.AutoField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     programa = models.ForeignKey(
         Programa, on_delete=models.CASCADE, related_name="equipe_programa"
     )
@@ -54,7 +54,7 @@ class EquipePrograma(models.Model):
 
 
 class Projeto(models.Model):
-    id_projeto = models.AutoField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     programa = models.ForeignKey(
         Programa, on_delete=models.CASCADE, related_name="projetos"
     )
@@ -68,7 +68,7 @@ class Projeto(models.Model):
 
 
 class ProjetoCampo(models.Model):
-    id_campo = models.AutoField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     projeto = models.ForeignKey(
         Projeto, on_delete=models.CASCADE, related_name="campos_projeto"
     )
@@ -87,7 +87,7 @@ class ProjetoCampo(models.Model):
 
 
 class EquipeProjeto(models.Model):
-    id_equipe_projeto = models.AutoField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     projeto = models.ForeignKey(
         Projeto, on_delete=models.CASCADE, related_name="equipes_projeto"
     )
@@ -100,7 +100,7 @@ class EquipeProjeto(models.Model):
 
 
 class ClasseEvento(models.Model):
-    id_classe = models.AutoField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     projeto = models.ForeignKey(
         Projeto, on_delete=models.CASCADE, related_name="classes_evento"
     )
@@ -111,10 +111,11 @@ class ClasseEvento(models.Model):
 
 
 class Evento(models.Model):
-    id_evento = models.AutoField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     projeto = models.ForeignKey(
         Projeto, on_delete=models.CASCADE, related_name="eventos"
     )
+    projeto_id: int
     classe_evento = models.ForeignKey(
         ClasseEvento, on_delete=models.CASCADE, related_name="eventos"
     )
@@ -129,7 +130,7 @@ class Evento(models.Model):
 
 
 class Template(models.Model):
-    id_template = models.AutoField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     projeto = models.ForeignKey(
         Projeto,
         on_delete=models.CASCADE,
@@ -137,19 +138,18 @@ class Template(models.Model):
         null=False,
         blank=False,
     )
-    nome_template = models.CharField(max_length=150)
+    projeto_id: int
+    nome = models.CharField(max_length=150)
     modelo_arquivo_base = models.CharField(max_length=255)
     data_criacao = models.DateTimeField(auto_now_add=True)
     ultima_atualizacao = models.DateTimeField(auto_now=True)
-
-    modelo_json = models.JSONField(default=dict, blank=True)
-
+    modelo_json = models.JSONField(default=dict, blank=False, null=False)
     is_locked = models.BooleanField(default=False)
     locked_by = models.CharField(max_length=150, null=True, blank=True)
     locked_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
-        return self.nome_template
+        return self.nome
 
 
 class TemplateClasseEvento(models.Model):
@@ -171,11 +171,11 @@ class TemplateClasseEvento(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.template.nome_template} - {self.classe_evento.nome_classe}"
+        return f"{self.template.nome} - {self.classe_evento.nome_classe}"
 
 
 class AssinaturaTemplate(models.Model):
-    id_assinatura_template = models.AutoField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     template = models.ForeignKey(
         Template,
         on_delete=models.CASCADE,
@@ -197,9 +197,7 @@ class AssinaturaTemplate(models.Model):
     )
 
     def __str__(self):
-        return (
-            f"{self.template.nome_template} - Assinatura {self.id_assinatura_template}"
-        )
+        return f"{self.template.nome} - Assinatura {self.id}"
 
     class Meta:
         indexes = [
@@ -230,7 +228,7 @@ class Asset(models.Model):
 
 
 class Relatorio(models.Model):
-    id_relatorio = models.AutoField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     evento = models.ForeignKey(
         Evento,
         on_delete=models.SET_NULL,
@@ -245,9 +243,9 @@ class Relatorio(models.Model):
     nome = models.CharField(max_length=150, blank=True, default="")
     status = models.CharField(max_length=50)
     metadados = models.JSONField(default=dict, blank=True)
-    documento_json = models.JSONField(default=dict, blank=True)
+    documento_json = models.JSONField(default=dict, blank=False, null=False)
     data_criacao = models.DateTimeField(auto_now_add=True)
     ultima_atualizacao = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Relatorio {self.id_relatorio} - {self.status}"
+        return f"Relatorio {self.id} - {self.status}"
