@@ -1,12 +1,32 @@
 from __future__ import annotations
 
+import re
 import tempfile
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from django.core.files.storage import default_storage
+from django.utils.text import slugify
 from docxtpl import DocxTemplate
+
+
+def build_docx_filename_and_content_disposition(
+    nome: str,
+    *,
+    fallback: str = "template",
+) -> str:
+    raw_name = nome or fallback
+    safe = slugify(str(raw_name)) or fallback
+    sanitized = re.sub(r'[\x00-\x1f\\/"\']+', " ", str(raw_name))
+    sanitized = re.sub(r"\s+", " ", sanitized).strip()[:80] or safe
+
+    content_disp = (
+        f'attachment; filename="{sanitized}.docx"; '
+        f"filename*=UTF-8''{quote(str(raw_name))}.docx"
+    )
+    return content_disp
 
 
 def extract_text_from_value(value: Any) -> str:

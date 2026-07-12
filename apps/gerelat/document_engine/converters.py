@@ -14,7 +14,6 @@ from typing import Any
 from docx import Document
 from docx.oxml.ns import qn
 
-
 # ── DOCX → ProseMirror ────────────────────────────────────────────
 
 
@@ -47,7 +46,11 @@ def _parse_run(r_elem: Any) -> list[dict]:
         if i_el is not None and i_el.get(qn("w:val"), "true") not in ("false", "0"):
             marks.append({"type": "em"})
         u_el = rpr.find(qn("w:u"))
-        if u_el is not None and u_el.get(qn("w:val"), "none") not in ("none", "false", "0"):
+        if u_el is not None and u_el.get(qn("w:val"), "none") not in (
+            "none",
+            "false",
+            "0",
+        ):
             marks.append({"type": "underline"})
 
     node: dict = {"type": "text", "text": text}
@@ -105,7 +108,10 @@ def _parse_table(tbl_elem: Any) -> dict:
 
         if i == 0:
             columns = [
-                {"key": re.sub(r"\W+", "_", c).lower() or f"col{j}", "label": c or f"Col{j}"}
+                {
+                    "key": re.sub(r"\W+", "_", c).lower() or f"col{j}",
+                    "label": c or f"Col{j}",
+                }
                 for j, c in enumerate(cells)
             ]
         else:
@@ -169,7 +175,9 @@ def _inline_nodes_from_valor(ref: str, valor: Any) -> list[dict]:
     if isinstance(valor, dict) and valor.get("type") == "doc":
         inline: list[dict] = []
         for block in valor.get("content", []):
-            inline.extend(_normalize_marks(child) for child in (block.get("content") or []))
+            inline.extend(
+                _normalize_marks(child) for child in (block.get("content") or [])
+            )
         return inline or [{"type": "text", "text": ""}]
 
     return [{"type": "text", "text": str(valor)}]
@@ -177,33 +185,50 @@ def _inline_nodes_from_valor(ref: str, valor: Any) -> list[dict]:
 
 def _block_nodes_for_image_ref(ref: str, node_attrs: dict, valor: Any) -> list[dict]:
     if not isinstance(valor, dict) or "asset_id" not in valor:
-        return [{"type": "paragraph", "content": [{"type": "text", "text": f"[imagem {ref} não encontrada]"}]}]
-    return [{
-        "type": "image_block",
-        "attrs": {
-            "asset_id": valor.get("asset_id"),
-            "width_mm": valor.get("width_mm"),
-            "height_mm": valor.get("height_mm"),
-            "caption": valor.get("caption") or node_attrs.get("caption", ""),
-        },
-    }]
+        return [
+            {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": f"[imagem {ref} não encontrada]"}],
+            }
+        ]
+    return [
+        {
+            "type": "image_block",
+            "attrs": {
+                "asset_id": valor.get("asset_id"),
+                "width_mm": valor.get("width_mm"),
+                "height_mm": valor.get("height_mm"),
+                "caption": valor.get("caption") or node_attrs.get("caption", ""),
+            },
+        }
+    ]
 
 
 def _block_nodes_for_table_ref(ref: str, node_attrs: dict, valor: Any) -> list[dict]:
     if not isinstance(valor, dict) or "columns" not in valor:
-        return [{"type": "paragraph", "content": [{"type": "text", "text": f"[tabela {ref} não encontrada]"}]}]
+        return [
+            {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": f"[tabela {ref} não encontrada]"}],
+            }
+        ]
     import json as _json
-    return [{
-        "type": "data_table",
-        "attrs": {
-            "caption": node_attrs.get("caption", ""),
-            "columns": _json.dumps(valor.get("columns", []), ensure_ascii=False),
-            "rows": _json.dumps(valor.get("rows", []), ensure_ascii=False),
-        },
-    }]
+
+    return [
+        {
+            "type": "data_table",
+            "attrs": {
+                "caption": node_attrs.get("caption", ""),
+                "columns": _json.dumps(valor.get("columns", []), ensure_ascii=False),
+                "rows": _json.dumps(valor.get("rows", []), ensure_ascii=False),
+            },
+        }
+    ]
 
 
-def _block_nodes_for_custom_text(label: str, existing_content: list[dict], valor: Any) -> list[dict]:
+def _block_nodes_for_custom_text(
+    label: str, existing_content: list[dict], valor: Any
+) -> list[dict]:
     """Use richtext campo valor if available, else keep existing custom_text content."""
     if isinstance(valor, dict) and valor.get("type") == "doc":
         return [_normalize_marks(b) for b in valor.get("content", [])]
@@ -211,8 +236,8 @@ def _block_nodes_for_custom_text(label: str, existing_content: list[dict], valor
 
 
 _INLINE_VAR_TYPES = {"var_text", "variable"}
-_IMAGE_VAR_TYPES  = {"var_image", "image_ref"}
-_TABLE_VAR_TYPES  = {"var_table", "table_ref"}
+_IMAGE_VAR_TYPES = {"var_image", "image_ref"}
+_TABLE_VAR_TYPES = {"var_table", "table_ref"}
 _RICHTEXT_VAR_TYPES = {"var_richtext"}
 
 
@@ -261,7 +286,9 @@ def _traverse_blocks(nodes: list[dict], variables: dict) -> list[dict]:
             else:
                 # Bloco editável livre — mantém como custom_text para edição no relatório
                 new_node = copy.copy(node)
-                new_node["content"] = _traverse_blocks(node.get("content", []), variables)
+                new_node["content"] = _traverse_blocks(
+                    node.get("content", []), variables
+                )
                 result.append(new_node)
 
         elif node_type == "paragraph":

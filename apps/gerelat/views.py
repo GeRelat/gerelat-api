@@ -1,7 +1,6 @@
 from typing import Any, cast
 
 from celery.result import AsyncResult
-from django.core.files.storage import default_storage
 from django.http import FileResponse
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import (
@@ -20,7 +19,11 @@ from .document_engine.converters import (
     replace_placeholders,
 )
 from .document_engine.renderer import prosemirror_to_docx
-from .document_engine.utils import build_render_context, render_docx_from_template
+from .document_engine.utils import (
+    build_docx_filename_and_content_disposition,
+    build_render_context,
+    render_docx_from_template,
+)
 from .models import (
     Asset,
     AssinaturaTemplate,
@@ -113,23 +116,15 @@ class TemplateViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="download")
     def download(self, request, pk=None):
         template = self.get_object()
-        stored_path = template.modelo_arquivo_base
 
-        if not default_storage.exists(stored_path):
-            return Response(
-                {"detail": "Arquivo não encontrado."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        if template.modelo_json:
+            rendered = replace_placeholders(template.modelo_json, {})
+            output_buffer = prosemirror_to_docx(rendered)
 
-        file_obj = default_storage.open(stored_path, "rb")
-
-        filename = f"{template.nome}.docx"
-        return FileResponse(
-            file_obj,
-            content_type=DOCX_ALLOWED_MIME,
-            as_attachment=True,
-            filename=filename,
-        )
+        content_disp = build_docx_filename_and_content_disposition(template.nome)
+        response = FileResponse(output_buffer, content_type=DOCX_ALLOWED_MIME)
+        response["Content-Disposition"] = content_disp
+        return response
 
     @extend_schema(
         request=TemplateCreateRequestSerializer,
@@ -397,10 +392,9 @@ class RelatorioViewSet(viewsets.ModelViewSet):
                 template.modelo_arquivo_base, context
             )
 
-        filename = f"{relatorio.nome}.docx"
-        return FileResponse(
-            output_buffer,
-            content_type=DOCX_ALLOWED_MIME,
-            as_attachment=True,
-            filename=filename,
+        content_disp = build_docx_filename_and_content_disposition(
+            relatorio.nome, fallback="relatorio"
         )
+        response = FileResponse(output_buffer, content_type=DOCX_ALLOWED_MIME)
+        response["Content-Disposition"] = content_disp
+        return response
