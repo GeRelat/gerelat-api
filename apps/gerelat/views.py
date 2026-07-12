@@ -303,25 +303,25 @@ class RelatorioViewSet(viewsets.ModelViewSet):
             OpenApiExample(
                 "Gerar relatório",
                 value={
-                    "template": 1,
-                    "evento": 2,
-                    "documento_json": {"type": "doc", "content": []},
                     "nome": "Relatório Financeiro Q2",
+                    "evento": 2,
+                    "template": 1,
+                    "documento_json": {"type": "doc", "content": []},
                 },
                 request_only=True,
             )
         ],
         description="Gera relatório a partir de um template.",
+        responses={202: TaskAcceptedSerializer},
     )
-    @action(detail=False, methods=["post"], url_path="gerar")
-    def gerar(self, request):
+    def create(self, request, *args, **kwargs):
         serializer = RelatorioGenerateRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        nome = serializer.validated_data.get("nome")
         evento = serializer.validated_data.get("evento")
         template = serializer.validated_data["template"]
         documento_json = serializer.validated_data.get("documento_json") or None
-        nome = serializer.validated_data.get("nome")
 
         task = cast(Any, generate_relatorio).delay(
             evento_id=evento.id if evento else None,

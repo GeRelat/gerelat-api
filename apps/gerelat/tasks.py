@@ -28,6 +28,9 @@ def _do_generate_relatorio(
     if not projeto_id:
         raise ValueError("Projeto não encontrado para gerar relatório.")
 
+    if documento_json is None:
+        documento_json = Template.objects.get(id=template_id).modelo_json
+
     campos = ProjetoCampo.objects.filter(projeto_id=projeto_id)
     context = {campo.referencia: campo.valor for campo in campos}
 
