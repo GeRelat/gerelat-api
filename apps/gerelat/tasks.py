@@ -15,7 +15,7 @@ def _do_generate_relatorio(
     nome: str | None = None,
     task_id: str | None = None,
 ) -> dict:
-    template = Template.objects.get(id_template=template_id)
+    template = Template.objects.get(id=template_id)
 
     evento = None
     projeto_id = template.projeto_id
@@ -28,20 +28,26 @@ def _do_generate_relatorio(
     if not projeto_id:
         raise ValueError("Projeto não encontrado para gerar relatório.")
 
+    if documento_json is None:
+        documento_json = Template.objects.get(id=template_id).modelo_json
+
     campos = ProjetoCampo.objects.filter(projeto_id=projeto_id)
     context = {campo.referencia: campo.valor for campo in campos}
 
     relatorio = Relatorio.objects.create(
-        evento_id=evento.id_evento if evento else None,
+        evento_id=evento.id if evento else None,
         template_id=template_id,
-        nome=nome or template.nome_template,
+        nome=nome or template.nome,
         arquivo_gerado="",
         status="SUCCESS",
         metadados=context,
         documento_json=documento_json or {},
     )
 
-    return {"task_id": task_id, "id_relatorio": relatorio.id_relatorio}
+    return {
+        "type": Relatorio.__name__,
+        "id": relatorio.id,
+    }
 
 
 @shared_task(
@@ -80,22 +86,20 @@ def generate_relatorio(
 def create_template(
     self,
     *,
-    stored_path: str,
-    nome_template: str,
+    nome: str,
     projeto_id: int,
+    modelo_json: dict,
 ) -> dict:
     try:
         template = Template.objects.create(
-            nome_template=nome_template,
+            nome=nome,
             projeto_id=projeto_id,
-            modelo_arquivo_base=stored_path,
+            modelo_json=modelo_json,
         )
 
         return {
-            "task_id": self.request.id,
-            "id_template": template.id_template,
-            "nome_template": template.nome_template,
-            "modelo_arquivo_base": template.modelo_arquivo_base,
+            "type": Template.__name__,
+            "id": template.id,
         }
     except Exception:
         logger.exception("Falha ao criar template.")

@@ -18,6 +18,7 @@ router.register(r"templates", views.TemplateViewSet)
 router.register(r"template-classes-evento", views.TemplateClasseEventoViewSet)
 router.register(r"assinaturas-template", views.AssinaturaTemplateViewSet)
 router.register(r"relatorios", views.RelatorioViewSet)
+router.register(r"tasks", views.TaskViewSet, basename="tasks")
 
 urlpatterns = [
     path("", include(router.urls)),

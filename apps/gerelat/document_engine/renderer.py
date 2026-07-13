@@ -10,7 +10,6 @@ from typing import Any
 from docx import Document
 from docx.shared import Mm, Pt, RGBColor
 
-
 # ── Inline helpers ────────────────────────────────────────────────
 
 
@@ -47,11 +46,12 @@ def _render_paragraph(doc: Any, node: dict) -> None:
 
 _HEADING_SIZES = {1: Pt(18), 2: Pt(14), 3: Pt(12)}
 
+
 def _render_heading(doc: Any, node: dict) -> None:
     level = node.get("attrs", {}).get("level", 1)
     para = doc.add_paragraph()
     para.paragraph_format.space_before = Pt(12 if level == 1 else 8)
-    para.paragraph_format.space_after  = Pt(6)
+    para.paragraph_format.space_after = Pt(6)
     _fill_inline(para, node.get("content", []))
     # Aplica tamanho e negrito a todos os runs do heading
     for r in para.runs:
@@ -79,12 +79,15 @@ def _render_list(doc: Any, node: dict) -> None:
 
 def _render_data_table(doc: Any, node: dict) -> None:
     import json as _json
+
     attrs = node.get("attrs", {})
     # columns/rows podem estar em attrs (JSON strings) ou diretos no nó (arrays)
     raw_cols = attrs.get("columns", node.get("columns", []))
-    raw_rows = attrs.get("rows",    node.get("rows", []))
-    columns: list[dict] = _json.loads(raw_cols) if isinstance(raw_cols, str) else raw_cols
-    rows: list[dict]    = _json.loads(raw_rows) if isinstance(raw_rows, str) else raw_rows
+    raw_rows = attrs.get("rows", node.get("rows", []))
+    columns: list[dict] = (
+        _json.loads(raw_cols) if isinstance(raw_cols, str) else raw_cols
+    )
+    rows: list[dict] = _json.loads(raw_rows) if isinstance(raw_rows, str) else raw_rows
     caption: str = attrs.get("caption", "")
 
     if not columns:
