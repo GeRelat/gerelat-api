@@ -136,6 +136,19 @@ def validate_image(value: Any) -> None:
         _require_str(data.get("caption"), "caption")
 
 
+def validate_prosemirror_doc(value: Any) -> Any:
+    """Valida que `value` é um documento ProseMirror raiz (dict com type='doc').
+
+    Levanta `ValidationError` do Django que o DRF converte automaticamente
+    nas camadas de serializer. Retorna `value` para uso em validate_<field>.
+    """
+    if not isinstance(value, dict) or value.get("type") != "doc":
+        _raise_schema_error(
+            "modelo_json deve ser um documento ProseMirror válido com type='doc'."
+        )
+    return value
+
+
 def validate_document_value(tipo: str, value: Any) -> None:
     if tipo not in CampoTipo.values:
         _raise_schema_error("Tipo de campo inválido.")

@@ -1,8 +1,6 @@
-import mimetypes
-
 from rest_framework import serializers
 
-from .constants import DOCX_ALLOWED_MIME
+from .document_engine.validators import validate_prosemirror_doc
 from .models import (
     Asset,
     AssinaturaTemplate,
@@ -90,28 +88,51 @@ class EventoSerializer(serializers.ModelSerializer):
 class TemplateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Template
-        fields = "__all__"
+        fields = [
+            "id",
+            "nome",
+            "projeto",
+            "ultima_atualizacao",
+            "data_criacao",
+            "modelo_json",
+        ]
+
+    def validate_modelo_json(self, value):
+        return validate_prosemirror_doc(value)
 
 
 class TemplateCreateRequestSerializer(serializers.Serializer):
-    nome_template = serializers.CharField(max_length=150)
-    modelo_arquivo_base = serializers.FileField()
-    projeto = serializers.PrimaryKeyRelatedField(
-        queryset=Projeto.objects.all(),
-        required=True,
+    """Serializer de request para criar um template. Todos os campos são obrigatórios."""
+
+    nome = serializers.CharField(max_length=150)
+    projeto = serializers.PrimaryKeyRelatedField(queryset=Projeto.objects.all())
+    modelo_json = serializers.JSONField()
+
+    def validate_modelo_json(self, value):
+        return validate_prosemirror_doc(value)
+
+
+class TaskAcceptedSerializer(serializers.Serializer):
+    """Serializer para respostas 202 de operações enfileiradas."""
+
+    detail = serializers.CharField()
+    task_id = serializers.UUIDField()
+    task_status = serializers.CharField()
+
+
+class TaskStatusSerializer(serializers.Serializer):
+    """Serializer para respostas do endpoint de consulta de status de task."""
+
+    task_id = serializers.UUIDField()
+    task_status = serializers.CharField()
+    result = serializers.JSONField(
+        required=False,
+        help_text="Presente quando task_status='SUCCESS'.",
     )
-
-    def validate_modelo_arquivo_base(self, value):
-        if not value.name.lower().endswith(".docx"):
-            raise serializers.ValidationError("Envie o template no formato .docx")
-
-        detected_content_type = (
-            getattr(value, "content_type", None) or mimetypes.guess_type(value.name)[0]
-        )
-        if detected_content_type != DOCX_ALLOWED_MIME:
-            raise serializers.ValidationError("Tipo de arquivo invalido para upload.")
-
-        return value
+    error = serializers.CharField(
+        required=False,
+        help_text="Presente quando task_status='FAILURE'.",
+    )
 
 
 class AssinaturaTemplateSerializer(serializers.ModelSerializer):
@@ -153,19 +174,6 @@ class RelatorioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Relatorio
         fields = "__all__"
-
-
-class TemplateFromJsonSerializer(serializers.Serializer):
-    nome_template = serializers.CharField(max_length=150)
-    projeto = serializers.PrimaryKeyRelatedField(queryset=Projeto.objects.all())
-    modelo_json = serializers.JSONField()
-
-    def validate_modelo_json(self, value):
-        if not isinstance(value, dict) or value.get("type") != "doc":
-            raise serializers.ValidationError(
-                "modelo_json deve ser um documento ProseMirror válido com type='doc'."
-            )
-        return value
 
 
 class RelatorioGenerateRequestSerializer(serializers.Serializer):
