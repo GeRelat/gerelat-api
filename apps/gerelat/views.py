@@ -1,6 +1,7 @@
 from typing import Any, cast
 
 from celery.result import AsyncResult
+from django.db.models import Q
 from django.http import FileResponse
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import (
@@ -19,14 +20,20 @@ from .document_engine.converters import (
     replace_placeholders,
 )
 from .document_engine.renderer import prosemirror_to_docx
+from .document_engine.scope import scan_required_nivel
+from .document_engine.system_fields import get_system_fields_for_level
 from .document_engine.utils import (
     build_docx_filename_and_content_disposition,
     build_render_context,
     render_docx_from_template,
 )
+from .document_engine.variables import build_variables_context
+from .enums import NIVEL_ORDEM, NivelTemplate
 from .models import (
     Asset,
     AssinaturaTemplate,
+    CampoDefinicao,
+    CampoValor,
     ClasseEvento,
     Cliente,
     EquipePrograma,
@@ -43,6 +50,8 @@ from .serializers import (
     AssetCreateRequestSerializer,
     AssetSerializer,
     AssinaturaTemplateSerializer,
+    CampoDefinicaoSerializer,
+    CampoValorSerializer,
     ClasseEventoSerializer,
     ClienteSerializer,
     EquipeProgramaSerializer,
@@ -93,6 +102,16 @@ class ProjetoCampoViewSet(viewsets.ModelViewSet):
     serializer_class = ProjetoCampoSerializer
 
 
+class CampoDefinicaoViewSet(viewsets.ModelViewSet):
+    queryset = CampoDefinicao.objects.all()
+    serializer_class = CampoDefinicaoSerializer
+
+
+class CampoValorViewSet(viewsets.ModelViewSet):
+    queryset = CampoValor.objects.all()
+    serializer_class = CampoValorSerializer
+
+
 class EquipeProjetoViewSet(viewsets.ModelViewSet):
     queryset = EquipeProjeto.objects.all()
     serializer_class = EquipeProjetoSerializer
@@ -136,9 +155,16 @@ class TemplateViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         validated_data = serializer.validated_data
 
+        cliente = validated_data.get("cliente")
+        programa = validated_data.get("programa")
+        projeto = validated_data.get("projeto")
+
         task = cast(Any, create_template).delay(
             nome=validated_data.get("nome"),
-            projeto_id=validated_data.get("projeto").pk,
+            nivel=validated_data.get("nivel"),
+            cliente_id=cliente.pk if cliente else None,
+            programa_id=programa.pk if programa else None,
+            projeto_id=projeto.pk if projeto else None,
             modelo_json=validated_data.get("modelo_json"),
         )
 
@@ -154,8 +180,9 @@ class TemplateViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="preview")
     def preview(self, request, pk=None):
         """
-        Resolve as variáveis do projeto no template e retorna o documento_json
-        pronto para edição/preview no front-end.
+        Resolve as variáveis (campos nativos + customizadas) visíveis para a
+        cadeia de instâncias informada e retorna o documento_json pronto para
+        edição/preview no front-end.
         """
         template = self.get_object()
         if not template.modelo_json:
@@ -166,24 +193,124 @@ class TemplateViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        cliente_id = request.query_params.get("cliente_id") or template.cliente_id
+        programa_id = request.query_params.get("programa_id") or template.programa_id
+        projeto_id = request.query_params.get("projeto_id") or template.projeto_id
         evento_id = request.query_params.get("evento_id")
-        projeto_id = template.projeto_id
 
         if evento_id:
             try:
-                evento = Evento.objects.get(id=evento_id)
-                projeto_id = evento.projeto_id
+                evento = Evento.objects.select_related(
+                    "projeto__programa__cliente"
+                ).get(id=evento_id)
             except Evento.DoesNotExist:
                 return Response(
                     {"detail": "Evento não encontrado."},
                     status=status.HTTP_404_NOT_FOUND,
                 )
+            projeto_id = evento.projeto_id
+            programa_id = evento.projeto.programa_id
+            cliente_id = evento.projeto.programa.cliente_id
 
-        campos = ProjetoCampo.objects.filter(projeto_id=projeto_id)
-        variables = {c.referencia: c.valor for c in campos}
+        variables = build_variables_context(
+            cliente_id=cliente_id,
+            programa_id=programa_id,
+            projeto_id=projeto_id,
+            evento_id=evento_id,
+        )
 
         documento_json = replace_placeholders(template.modelo_json, variables)
         return Response({"documento_json": documento_json})
+
+    @action(detail=False, methods=["get"], url_path="variaveis-disponiveis")
+    def variaveis_disponiveis(self, request):
+        """Lista campos nativos + variáveis customizadas visíveis para autocompletar
+        a criação de um template no nível/instância informados."""
+        nivel = request.query_params.get("nivel")
+        if nivel not in NivelTemplate.values:
+            return Response(
+                {"detail": "Informe um nivel válido: cliente, programa ou projeto."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cliente = programa = projeto = None
+        cliente_id = request.query_params.get("cliente_id")
+        programa_id = request.query_params.get("programa_id")
+        projeto_id = request.query_params.get("projeto_id")
+
+        if projeto_id:
+            projeto = Projeto.objects.select_related("programa__cliente").get(
+                id=projeto_id
+            )
+            programa = projeto.programa
+            cliente = programa.cliente
+        elif programa_id:
+            programa = Programa.objects.select_related("cliente").get(id=programa_id)
+            cliente = programa.cliente
+        elif cliente_id:
+            cliente = Cliente.objects.get(id=cliente_id)
+
+        conditions = []
+        if cliente:
+            conditions.append(Q(cliente_id=cliente.id))
+        if programa:
+            conditions.append(Q(programa_id=programa.id))
+        if projeto:
+            conditions.append(Q(projeto_id=projeto.id))
+
+        definicoes = []
+        if conditions:
+            filtro = conditions[0]
+            for condition in conditions[1:]:
+                filtro |= condition
+            definicoes = list(CampoDefinicao.objects.filter(filtro))
+
+        max_ordem = NIVEL_ORDEM[nivel]
+        resultado = [
+            {
+                "referencia": d.referencia,
+                "descricao": d.descricao,
+                "tipo": d.tipo,
+                "nivel_aplicacao": d.nivel_aplicacao,
+                "origem": "customizado",
+                "obrigatorio": d.obrigatorio,
+            }
+            for d in definicoes
+            if NIVEL_ORDEM[d.nivel_aplicacao] <= max_ordem
+        ]
+
+        for nivel_sistema in NivelTemplate.values:
+            if NIVEL_ORDEM[nivel_sistema] > max_ordem:
+                continue
+            for referencia, tipo, descricao in get_system_fields_for_level(
+                nivel_sistema
+            ):
+                resultado.append(
+                    {
+                        "referencia": referencia,
+                        "descricao": descricao,
+                        "tipo": tipo,
+                        "nivel_aplicacao": nivel_sistema,
+                        "origem": "sistema",
+                        "obrigatorio": False,
+                    }
+                )
+
+        # Campos nativos de Evento sempre podem ser usados (evento é o alvo
+        # final de qualquer nível de template).
+        for referencia, tipo, descricao in get_system_fields_for_level("evento"):
+            resultado.append(
+                {
+                    "referencia": referencia,
+                    "descricao": descricao,
+                    "tipo": tipo,
+                    "nivel_aplicacao": "evento",
+                    "origem": "sistema",
+                    "obrigatorio": False,
+                }
+            )
+
+        return Response(resultado)
 
     @extend_schema(
         request=TemplateSerializer,
@@ -319,11 +446,17 @@ class RelatorioViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         nome = serializer.validated_data.get("nome")
+        cliente = serializer.validated_data.get("cliente")
+        programa = serializer.validated_data.get("programa")
+        projeto = serializer.validated_data.get("projeto")
         evento = serializer.validated_data.get("evento")
         template = serializer.validated_data["template"]
         documento_json = serializer.validated_data.get("documento_json") or None
 
         task = cast(Any, generate_relatorio).delay(
+            cliente_id=cliente.id if cliente else None,
+            programa_id=programa.id if programa else None,
+            projeto_id=projeto.id if projeto else None,
             evento_id=evento.id if evento else None,
             template_id=template.id,
             documento_json=documento_json,
