@@ -60,6 +60,10 @@ class AssetSerializer(serializers.ModelSerializer):
 
 
 class AssetCreateRequestSerializer(serializers.Serializer):
+    # `read_only`: não é aceito como entrada, só incluído na resposta após a
+    # criação — sem isso, o POST /assets/ retorna 201 sem o id do asset
+    # criado, e quem chama a API não tem como saber qual registro foi criado.
+    id = serializers.IntegerField(read_only=True)
     arquivo = serializers.ImageField()
     descricao = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
