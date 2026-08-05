@@ -307,6 +307,34 @@ def _traverse_blocks(nodes: list[dict], variables: dict) -> list[dict]:
     return result
 
 
+def extract_gap_refs(template_json: dict) -> set[str]:
+    """Walk a ProseMirror template JSON and collect every ref/label referenced
+    by a gap node (var_text/variable/var_richtext/var_image/image_ref/
+    var_table/table_ref/custom_text)."""
+    refs: set[str] = set()
+    gap_ref_types = (
+        _INLINE_VAR_TYPES | _IMAGE_VAR_TYPES | _TABLE_VAR_TYPES | _RICHTEXT_VAR_TYPES
+    )
+
+    def _walk(nodes: list[dict]) -> None:
+        for node in nodes:
+            node_type = node.get("type")
+            attrs = node.get("attrs") or {}
+            if node_type in gap_ref_types:
+                ref = attrs.get("ref")
+                if ref:
+                    refs.add(ref)
+            elif node_type == "custom_text":
+                label = attrs.get("label")
+                if label:
+                    refs.add(label)
+            if "content" in node:
+                _walk(node["content"])
+
+    _walk(template_json.get("content", []))
+    return refs
+
+
 def replace_placeholders(template_json: dict, variables: dict) -> dict:
     """
     Walk a ProseMirror template JSON and replace all placeholder nodes
