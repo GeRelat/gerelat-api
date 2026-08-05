@@ -2,14 +2,18 @@ import logging
 
 from celery import shared_task
 
-from .models import Evento, ProjetoCampo, Relatorio, Template
+from .document_engine.variables import build_variables_context
+from .models import Relatorio, Template
 
 logger = logging.getLogger(__name__)
 
 
 def _do_generate_relatorio(
     *,
-    evento_id: int | None,
+    cliente_id: int | None = None,
+    programa_id: int | None = None,
+    projeto_id: int | None = None,
+    evento_id: int | None = None,
     template_id: int,
     documento_json: dict | None = None,
     nome: str | None = None,
@@ -17,25 +21,18 @@ def _do_generate_relatorio(
 ) -> dict:
     template = Template.objects.get(id=template_id)
 
-    evento = None
-    projeto_id = template.projeto_id
-    if evento_id:
-        evento = Evento.objects.select_related("projeto", "projeto__programa").get(
-            id_evento=evento_id
-        )
-        projeto_id = evento.projeto_id
-
-    if not projeto_id:
-        raise ValueError("Projeto não encontrado para gerar relatório.")
-
     if documento_json is None:
-        documento_json = Template.objects.get(id=template_id).modelo_json
+        documento_json = template.modelo_json
 
-    campos = ProjetoCampo.objects.filter(projeto_id=projeto_id)
-    context = {campo.referencia: campo.valor for campo in campos}
+    context = build_variables_context(
+        cliente_id=cliente_id,
+        programa_id=programa_id,
+        projeto_id=projeto_id,
+        evento_id=evento_id,
+    )
 
     relatorio = Relatorio.objects.create(
-        evento_id=evento.id if evento else None,
+        evento_id=evento_id,
         template_id=template_id,
         nome=nome or template.nome,
         arquivo_gerado="",
@@ -59,13 +56,19 @@ def _do_generate_relatorio(
 def generate_relatorio(
     self,
     *,
-    evento_id: int | None,
+    cliente_id: int | None = None,
+    programa_id: int | None = None,
+    projeto_id: int | None = None,
+    evento_id: int | None = None,
     template_id: int,
     documento_json: dict | None = None,
     nome: str | None = None,
 ) -> dict:
     try:
         return _do_generate_relatorio(
+            cliente_id=cliente_id,
+            programa_id=programa_id,
+            projeto_id=projeto_id,
             evento_id=evento_id,
             template_id=template_id,
             documento_json=documento_json,
@@ -87,12 +90,18 @@ def create_template(
     self,
     *,
     nome: str,
-    projeto_id: int,
+    nivel: str,
+    cliente_id: int | None = None,
+    programa_id: int | None = None,
+    projeto_id: int | None = None,
     modelo_json: dict,
 ) -> dict:
     try:
         template = Template.objects.create(
             nome=nome,
+            nivel=nivel,
+            cliente_id=cliente_id,
+            programa_id=programa_id,
             projeto_id=projeto_id,
             modelo_json=modelo_json,
         )
