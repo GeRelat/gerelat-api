@@ -84,6 +84,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "drf_spectacular",
     "corsheaders",
+    "django_celery_beat",
     "apps.gerelat",
     "apps.accounts",
 ]
@@ -175,7 +176,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "America/Sao_Paulo"
 
 USE_I18N = True
 
@@ -201,7 +202,8 @@ if S3_ENABLED:
     AWS_ACCESS_KEY_ID = S3_ACCESS_KEY
     AWS_SECRET_ACCESS_KEY = S3_SECRET_KEY
     AWS_DEFAULT_ACL = None
-    AWS_QUERYSTRING_AUTH = False
+    AWS_QUERYSTRING_AUTH = True
+    AWS_QUERYSTRING_EXPIRE = 3600
     AWS_S3_SIGNATURE_VERSION = "s3v4"
     AWS_S3_ADDRESSING_STYLE = "path"
 
@@ -225,5 +227,6 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TRACK_STARTED = True
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
