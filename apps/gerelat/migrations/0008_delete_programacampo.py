@@ -4,13 +4,12 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('gerelat', '0007_assinaturatemplate'),
+        ("gerelat", "0007_assinaturatemplate"),
     ]
 
     operations = [
         migrations.DeleteModel(
-            name='ProgramaCampo',
+            name="ProgramaCampo",
         ),
     ]

@@ -35,3 +35,5 @@ staticfiles/
 
 # Logs generated during development
 *.log
+
+test/

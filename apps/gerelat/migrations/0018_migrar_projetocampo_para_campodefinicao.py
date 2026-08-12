@@ -35,9 +35,7 @@ def reverter_migracao(apps, schema_editor):
     CampoDefinicao = apps.get_model("gerelat", "CampoDefinicao")
     CampoValor = apps.get_model("gerelat", "CampoValor")
 
-    CampoValor.objects.filter(
-        definicao__legacy_projeto_campo_id__isnull=False
-    ).delete()
+    CampoValor.objects.filter(definicao__legacy_projeto_campo_id__isnull=False).delete()
     CampoDefinicao.objects.filter(legacy_projeto_campo_id__isnull=False).delete()
 
 

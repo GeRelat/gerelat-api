@@ -1,9 +1,12 @@
 import logging
 
 from celery import shared_task
+from django.db import transaction
+from django.utils import timezone
 
 from .document_engine.variables import build_variables_context
-from .models import Relatorio, Template
+from .models import AgendamentoRelatorio, Relatorio, Template
+from .services.agendamento_relatorio import sincronizar_periodic_task
 
 logger = logging.getLogger(__name__)
 
@@ -113,3 +116,60 @@ def create_template(
     except Exception:
         logger.exception("Falha ao criar template.")
         raise
+
+
+@shared_task
+def executar_agendamento_relatorio(agendamento_id: int) -> dict | None:
+    now = timezone.now()
+    with transaction.atomic():
+        try:
+            agendamento = AgendamentoRelatorio.objects.select_for_update(
+                skip_locked=True
+            ).get(id=agendamento_id)
+        except AgendamentoRelatorio.DoesNotExist:
+            logger.info(f"Agendamento {agendamento_id} não disponível para execução.")
+            return None
+
+        if not agendamento.ativo:
+            return None
+
+        if agendamento.ultima_execucao:
+            diff = (now - agendamento.ultima_execucao).total_seconds()
+            if diff < 10:
+                logger.info(
+                    f"Agendamento {agendamento_id} já executado há {diff:.1f}s."
+                )
+                return None
+
+        cliente_id = agendamento.cliente_id
+        programa_id = agendamento.programa_id
+        projeto_id = agendamento.projeto_id
+        evento_id = agendamento.evento_id
+        template_id = agendamento.template_id
+        documento_json = agendamento.documento_json or None
+        nome = agendamento.nome
+
+        agendamento.ultima_execucao = now
+        if agendamento.tipo_agendamento == AgendamentoRelatorio.TIPO_PONTUAL:
+            agendamento.ativo = False
+            agendamento.proxima_execucao = None
+        else:
+            agendamento.proxima_execucao = agendamento.calcular_proxima_execucao(
+                a_partir_de=agendamento.proxima_execucao or now
+            )
+
+        agendamento.save(recalculate_proxima=False)
+
+        sincronizar_periodic_task(agendamento)
+
+    generate_relatorio.delay(
+        cliente_id=cliente_id,
+        programa_id=programa_id,
+        projeto_id=projeto_id,
+        evento_id=evento_id,
+        template_id=template_id,
+        documento_json=documento_json,
+        nome=nome,
+    )
+
+    return None
