@@ -28,4 +28,4 @@ USER app
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uv run manage.py migrate && uv run granian config.asgi:application --interface asgi --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "uv run granian config.asgi:application --interface asgi --host 0.0.0.0 --port 8000"]

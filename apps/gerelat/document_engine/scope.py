@@ -15,7 +15,9 @@ from .converters import extract_gap_refs
 from .system_fields import SISTEMA_PREFIXO, is_system_referencia
 
 
-def _visible_definicoes_nivel_map(*, cliente=None, programa=None, projeto=None) -> dict[str, str]:
+def _visible_definicoes_nivel_map(
+    *, cliente=None, programa=None, projeto=None
+) -> dict[str, str]:
     from ..models import CampoDefinicao
 
     conditions = []
@@ -30,10 +32,26 @@ def _visible_definicoes_nivel_map(*, cliente=None, programa=None, projeto=None) 
         return {}
 
     filtro = reduce(operator.or_, conditions)
-    return {
-        d.referencia: d.nivel_aplicacao
-        for d in CampoDefinicao.objects.filter(filtro)
-    }
+    # return {
+    #     d.referencia: d.nivel_aplicacao
+    #     for d in CampoDefinicao.objects.filter(filtro)
+    # }
+    nivel_map = {}
+    for d in CampoDefinicao.objects.filter(filtro):
+        nivel_map[d.referencia] = d.nivel_aplicacao
+        if d.cliente_id:
+            clean_ref = d.referencia.removeprefix("cliente.")
+            nivel_map[f"cliente.{clean_ref}"] = d.nivel_aplicacao
+            nivel_map[clean_ref] = d.nivel_aplicacao
+        elif d.programa_id:
+            clean_ref = d.referencia.removeprefix("programa.")
+            nivel_map[f"programa.{clean_ref}"] = d.nivel_aplicacao
+            nivel_map[clean_ref] = d.nivel_aplicacao
+        elif d.projeto_id:
+            clean_ref = d.referencia.removeprefix("projeto.")
+            nivel_map[f"projeto.{clean_ref}"] = d.nivel_aplicacao
+            nivel_map[clean_ref] = d.nivel_aplicacao
+    return nivel_map
 
 
 def scan_required_nivel(

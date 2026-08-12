@@ -5,20 +5,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('gerelat', '0008_delete_programacampo'),
+        ("gerelat", "0008_delete_programacampo"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='template',
-            name='programa',
+            model_name="template",
+            name="programa",
         ),
         migrations.AlterField(
-            model_name='template',
-            name='projeto',
-            field=models.ForeignKey(default=1, on_delete=django.db.models.deletion.CASCADE, related_name='templates', to='gerelat.projeto'),
+            model_name="template",
+            name="projeto",
+            field=models.ForeignKey(
+                default=1,
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="templates",
+                to="gerelat.projeto",
+            ),
             preserve_default=False,
         ),
     ]

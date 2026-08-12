@@ -30,24 +30,49 @@ def _resolve_chain(
     cliente = None
 
     if evento_id:
-        evento = Evento.objects.select_related(
-            "projeto__programa__cliente"
-        ).get(id=evento_id)
-        projeto = evento.projeto
-    elif projeto_id:
-        projeto = Projeto.objects.select_related("programa__cliente").get(
-            id=projeto_id
-        )
+        try:
+            evento = Evento.objects.select_related(
+                "projeto__programa__cliente",
+                "programa__cliente",
+                "cliente",
+            ).get(id=evento_id)
+            if evento.projeto:
+                projeto = evento.projeto
+                programa = projeto.programa
+                cliente = programa.cliente
+            elif evento.programa:
+                programa = evento.programa
+                cliente = programa.cliente
+            elif evento.cliente:
+                cliente = evento.cliente
+        except Evento.DoesNotExist:
+            evento = None
 
-    if projeto:
-        programa = projeto.programa
-    elif programa_id:
-        programa = Programa.objects.select_related("cliente").get(id=programa_id)
+    if not projeto and projeto_id:
+        try:
+            projeto = Projeto.objects.select_related("programa__cliente").get(
+                id=projeto_id
+            )
+            if not programa:
+                programa = projeto.programa
+            if not cliente:
+                cliente = programa.cliente
+        except Projeto.DoesNotExist:
+            pass
 
-    if programa:
-        cliente = programa.cliente
-    elif cliente_id:
-        cliente = Cliente.objects.get(id=cliente_id)
+    if not programa and programa_id:
+        try:
+            programa = Programa.objects.select_related("cliente").get(id=programa_id)
+            if not cliente:
+                cliente = programa.cliente
+        except Programa.DoesNotExist:
+            pass
+
+    if not cliente and cliente_id:
+        try:
+            cliente = Cliente.objects.get(id=cliente_id)
+        except Cliente.DoesNotExist:
+            pass
 
     return cliente, programa, projeto, evento
 
@@ -85,6 +110,37 @@ def build_variables_context(
     if conditions:
         filtro = reduce(operator.or_, conditions)
         campo_valores = CampoValor.objects.filter(filtro).select_related("definicao")
-        context.update({cv.definicao.referencia: cv.valor for cv in campo_valores})
+
+        def _sort_key(cv):
+            d = cv.definicao
+            if d.cliente_id:
+                return 1
+            if d.programa_id:
+                return 2
+            if d.projeto_id:
+                return 3
+            return 4
+
+        campo_valores_ordenados = sorted(campo_valores, key=_sort_key)
+
+        for cv in campo_valores_ordenados:
+            ref = cv.definicao.referencia
+            d = cv.definicao
+            if d.cliente_id:
+                clean_ref = ref.removeprefix("cliente.")
+                context[f"cliente.{clean_ref}"] = cv.valor
+                context[clean_ref] = cv.valor
+            elif d.programa_id:
+                clean_ref = ref.removeprefix("programa.")
+                context[f"programa.{clean_ref}"] = cv.valor
+                context[clean_ref] = cv.valor
+            elif d.projeto_id:
+                clean_ref = ref.removeprefix("projeto.")
+                context[f"projeto.{clean_ref}"] = cv.valor
+                context[clean_ref] = cv.valor
+            else:
+                clean_ref = ref.removeprefix("evento.")
+                context[f"evento.{clean_ref}"] = cv.valor
+                context[clean_ref] = cv.valor
 
     return context

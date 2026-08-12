@@ -4,15 +4,21 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('gerelat', '0016_campodefinicao_campovalor_template_niveis'),
+        ("gerelat", "0016_campodefinicao_campovalor_template_niveis"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='template',
-            name='nivel',
-            field=models.CharField(choices=[('cliente', 'Cliente'), ('programa', 'Programa'), ('projeto', 'Projeto')], max_length=20),
+            model_name="template",
+            name="nivel",
+            field=models.CharField(
+                choices=[
+                    ("cliente", "Cliente"),
+                    ("programa", "Programa"),
+                    ("projeto", "Projeto"),
+                ],
+                max_length=20,
+            ),
         ),
     ]
