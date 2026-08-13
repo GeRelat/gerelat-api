@@ -1,43 +1,58 @@
+networks:
+  coolify:
+    external: true
+
 services:
     migrate:
         build: .
-        command: uv run manage.py migrate
+        command: python manage.py migrate
         env_file:
             - .env
         restart: "no"
     web:
         build: .
-        command: uv run granian config.asgi:application --interface asgi --host 0.0.0.0 --port 8000
         env_file:
             - .env
         restart: unless-stopped
         depends_on:
             migrate:
                 condition: service_completed_successfully
+        networks:
+            - default
+            - coolify
     worker:
         build: .
-        command: uv run celery -A config worker --loglevel=info
+        command: celery -A config worker --loglevel=info
         env_file:
             - .env
         restart: unless-stopped
         depends_on:
             migrate:
                 condition: service_completed_successfully
+        networks:
+            - default
+            - coolify
     beat:
         build: .
-        command: uv run celery -A config beat -l info
+        command: celery -A config beat -l info
         env_file:
             - .env
         restart: unless-stopped
         depends_on:
             migrate:
                 condition: service_completed_successfully
+        networks:
+            - default
+            - coolify
     flower:
         build: .
-        command: uv run celery -A config flower --port=5555
+        command: celery -A config flower --port=5555
         env_file:
             - .env
         restart: unless-stopped
         depends_on:
             worker:
                 condition: service_started
+        networks:
+            - default
+            - coolify
