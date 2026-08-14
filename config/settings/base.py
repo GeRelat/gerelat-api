@@ -145,15 +145,28 @@ _db_sslmode = os.getenv("DJANGO_DB_SSLMODE", "")
 _db_config: dict[str, object] = {
     "ENGINE": _db_engine,
     "NAME": os.getenv("DJANGO_DB_NAME", "gerelat"),
+    "CONN_MAX_AGE": 0,
 }
+
+if _db_engine == "django.db.backends.postgresql":
+    db_options: dict[str, object] = {
+        "pool": {
+            "min_size": 2,
+            "max_size": 10,
+            "timeout": 10,
+        },
+    }
+
+    if _db_sslmode:
+        db_options["sslmode"] = _db_sslmode
+
+    _db_config["OPTIONS"] = db_options
 
 if _db_engine != "django.db.backends.sqlite3":
     _db_config["USER"] = os.getenv("DJANGO_DB_USER", "")
     _db_config["PASSWORD"] = os.getenv("DJANGO_DB_PASSWORD", "")
     _db_config["HOST"] = os.getenv("DJANGO_DB_HOST", "localhost")
     _db_config["PORT"] = os.getenv("DJANGO_DB_PORT", "5432")
-    if _db_sslmode:
-        _db_config["OPTIONS"] = {"sslmode": _db_sslmode}
 
 DATABASES = {"default": _db_config}
 
