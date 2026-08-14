@@ -49,4 +49,4 @@ USER app
 
 EXPOSE 8000
 
-CMD ["granian", "config.asgi:application", "--interface", "asginl", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["granian", "config.wsgi:application", "--interface", "wsgi", "--host", "0.0.0.0", "--port", "8000"]
