@@ -501,9 +501,8 @@ class AssetLogomarcaTest(TestCase):
         asset = Asset.objects.create(
             arquivo="assets/test-programa-logo.png", cliente=self.cliente
         )
-        logomarca_url = "http://localhost:8000/storage/v1/s3/gerelat/assets/test-programa-logo.png?v=1"
 
-        self.programa.logomarca = logomarca_url
+        self.programa.logomarca = asset
         self.programa.save()
 
         asset.refresh_from_db()
