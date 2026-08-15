@@ -1,3 +1,4 @@
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -137,7 +138,56 @@ class AssetCreateRequestSerializer(serializers.Serializer):
         return asset
 
 
+class LogomarcaField(serializers.Field):
+    """Campo para serializar/deserializar o vínculo de Asset de logomarca.
+    No envio (escrita): aceita ID do Asset (int/str), objeto dict com ID/url, string de URL, ou null/vazio.
+    Na resposta (leitura): retorna sempre a URL pública do arquivo do Asset (ou string vazia).
+    """
+
+    def to_representation(self, value):
+        if value and hasattr(value, "arquivo") and value.arquivo:
+            return value.arquivo.url
+        return ""
+
+    def to_internal_value(self, data):
+        if not data:
+            return None
+
+        if isinstance(data, Asset):
+            return data
+
+        if isinstance(data, int) or (isinstance(data, str) and data.isdigit()):
+            try:
+                return Asset.objects.get(pk=int(data))
+            except Asset.DoesNotExist:
+                raise serializers.ValidationError("Asset informado não encontrado.")
+
+        if isinstance(data, dict):
+            asset_id = data.get("id") or data.get("asset_id")
+            if asset_id and (isinstance(asset_id, int) or str(asset_id).isdigit()):
+                try:
+                    return Asset.objects.get(pk=int(asset_id))
+                except Asset.DoesNotExist:
+                    raise serializers.ValidationError("Asset informado não encontrado.")
+
+        if isinstance(data, str):
+            url = data.strip()
+            if not url:
+                return None
+            nome_arquivo = url.split("?")[0].split("#")[0].split("/")[-1].strip()
+            if nome_arquivo:
+                asset = Asset.objects.filter(
+                    Q(arquivo__icontains=nome_arquivo) | Q(arquivo=url)
+                ).first()
+                if asset:
+                    return asset
+
+        return None
+
+
 class ProgramaSerializer(serializers.ModelSerializer):
+    logomarca = LogomarcaField(required=False, allow_null=True)
+
     class Meta:
         model = Programa
         fields = "__all__"
@@ -150,6 +200,8 @@ class EquipeProgramaSerializer(serializers.ModelSerializer):
 
 
 class ProjetoSerializer(serializers.ModelSerializer):
+    logomarca = LogomarcaField(required=False, allow_null=True)
+
     class Meta:
         model = Projeto
         fields = "__all__"
@@ -400,6 +452,8 @@ class AssinaturaTemplateSerializer(serializers.ModelSerializer):
 
 
 class ClienteSerializer(serializers.ModelSerializer):
+    logomarca = LogomarcaField(required=False, allow_null=True)
+
     class Meta:
         model = Cliente
         fields = "__all__"

@@ -20,9 +20,21 @@ class Cliente(models.Model):
     fone_contato = models.CharField(max_length=20)
     numero_contrato = models.CharField(max_length=100)
     data_termino_contrato = models.DateField()
-    logomarca = models.TextField(blank=True, default="")
+    logomarca = models.ForeignKey(
+        "Asset",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="clientes_logomarca",
+    )
     data_criacao = models.DateTimeField(auto_now_add=True)
     ultima_atualizacao = models.DateTimeField(auto_now=True)
+
+    @property
+    def logomarca_url(self) -> str:
+        if self.logomarca and self.logomarca.arquivo:
+            return self.logomarca.arquivo.url
+        return ""
 
     def __str__(self):
         return self.nome
@@ -157,8 +169,20 @@ class Programa(models.Model):
     nome = models.CharField(max_length=150)
     lei_criacao = models.CharField(max_length=150)
     convenio_dados = models.CharField(max_length=150)
-    logomarca = models.TextField(blank=True, default="")
+    logomarca = models.ForeignKey(
+        "Asset",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="programas_logomarca",
+    )
     rodape = models.TextField(blank=True, default="")
+
+    @property
+    def logomarca_url(self) -> str:
+        if self.logomarca and self.logomarca.arquivo:
+            return self.logomarca.arquivo.url
+        return ""
 
     def __str__(self):
         return self.nome
@@ -184,7 +208,19 @@ class Projeto(models.Model):
     nome = models.CharField(max_length=150)
     parceira = models.CharField(max_length=150, blank=True, default="")
     sigla = models.CharField(max_length=30, blank=True, default="")
-    logomarca = models.TextField(blank=True, default="")
+    logomarca = models.ForeignKey(
+        "Asset",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="projetos_logomarca",
+    )
+
+    @property
+    def logomarca_url(self) -> str:
+        if self.logomarca and self.logomarca.arquivo:
+            return self.logomarca.arquivo.url
+        return ""
 
     def __str__(self):
         return self.nome
@@ -983,8 +1019,6 @@ def _ao_salvar_campo_valor(sender, instance, **kwargs):
 
 
 def sincronizar_asset_uso_logomarca(entidade, tipo_uso: str):
-    logomarca = (getattr(entidade, "logomarca", None) or "").strip()
-
     filter_kwargs = {"tipo_uso": tipo_uso}
     if tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_PROGRAMA:
         filter_kwargs["programa"] = entidade
@@ -997,49 +1031,43 @@ def sincronizar_asset_uso_logomarca(entidade, tipo_uso: str):
 
     AssetUso.objects.filter(**filter_kwargs).delete()
 
-    if not logomarca:
+    asset = getattr(entidade, "logomarca", None)
+    if not asset:
         return
 
-    nome_arquivo = logomarca.split("?")[0].split("#")[0].split("/")[-1].strip()
+    if (
+        tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_PROGRAMA
+        and asset.programa_id != entidade.id
+    ):
+        asset.programa = entidade
+        asset.cliente = None
+        asset.projeto = None
+        asset.save()
+    elif (
+        tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_PROJETO
+        and asset.projeto_id != entidade.id
+    ):
+        asset.projeto = entidade
+        asset.cliente = None
+        asset.programa = None
+        asset.save()
+    elif (
+        tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_CLIENTE
+        and asset.cliente_id != entidade.id
+    ):
+        asset.cliente = entidade
+        asset.programa = None
+        asset.projeto = None
+        asset.save()
 
-    asset = Asset.objects.filter(
-        Q(arquivo__icontains=nome_arquivo) | Q(arquivo=logomarca)
-    ).first()
-
-    if asset:
-        if (
-            tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_PROGRAMA
-            and asset.programa_id != entidade.id
-        ):
-            asset.programa = entidade
-            asset.cliente = None
-            asset.projeto = None
-            asset.save()
-        elif (
-            tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_PROJETO
-            and asset.projeto_id != entidade.id
-        ):
-            asset.projeto = entidade
-            asset.cliente = None
-            asset.programa = None
-            asset.save()
-        elif (
-            tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_CLIENTE
-            and asset.cliente_id != entidade.id
-        ):
-            asset.cliente = entidade
-            asset.programa = None
-            asset.projeto = None
-            asset.save()
-
-        usage = AssetUso(asset=asset, tipo_uso=tipo_uso)
-        if tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_PROGRAMA:
-            usage.programa = entidade
-        elif tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_PROJETO:
-            usage.projeto = entidade
-        elif tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_CLIENTE:
-            usage.cliente = entidade
-        usage.save()
+    usage = AssetUso(asset=asset, tipo_uso=tipo_uso)
+    if tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_PROGRAMA:
+        usage.programa = entidade
+    elif tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_PROJETO:
+        usage.projeto = entidade
+    elif tipo_uso == AssetUso.TIPO_USO_LOGOMARCA_CLIENTE:
+        usage.cliente = entidade
+    usage.save()
 
 
 class Relatorio(models.Model):
