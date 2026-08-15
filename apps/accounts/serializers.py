@@ -80,7 +80,7 @@ class UserSerializer(serializers.ModelSerializer):
                     "id": cliente.id,
                     "nome": cliente.nome,
                     "papel": "admin",
-                    "logomarca": cliente.logomarca,
+                    "logomarca": cliente.logomarca_url,
                 }
                 for cliente in Cliente.objects.order_by("nome")
             ]
@@ -90,7 +90,7 @@ class UserSerializer(serializers.ModelSerializer):
                     "id": membro.cliente_id,
                     "nome": membro.cliente.nome,
                     "papel": "admin",
-                    "logomarca": membro.cliente.logomarca,
+                    "logomarca": membro.cliente.logomarca_url,
                 }
                 for membro in MembroCliente.objects.select_related("cliente").filter(
                     user=user
@@ -104,7 +104,7 @@ class UserSerializer(serializers.ModelSerializer):
                 "cliente_nome": membro.programa.cliente.nome
                 if membro.programa.cliente
                 else None,
-                "cliente_logomarca": membro.programa.cliente.logomarca
+                "cliente_logomarca": membro.programa.cliente.logomarca_url
                 if membro.programa.cliente
                 else "",
                 "papel": "membro",
@@ -124,7 +124,7 @@ class UserSerializer(serializers.ModelSerializer):
                 "cliente_nome": membro.projeto.programa.cliente.nome
                 if membro.projeto.programa and membro.projeto.programa.cliente
                 else None,
-                "cliente_logomarca": membro.projeto.programa.cliente.logomarca
+                "cliente_logomarca": membro.projeto.programa.cliente.logomarca_url
                 if membro.projeto.programa and membro.projeto.programa.cliente
                 else "",
                 "papel": "membro",
