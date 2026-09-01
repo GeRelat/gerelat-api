@@ -8,6 +8,7 @@ from .document_engine.converters import replace_placeholders
 from .document_engine.variables import build_variables_context
 from .models import AgendamentoRelatorio, Relatorio, Template
 from .services.agendamento_relatorio import sincronizar_periodic_task
+from .services.assinaturas_relatorio import resolver_assinaturas
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ def _do_generate_relatorio(
     template_id: int,
     documento_json: dict | None = None,
     nome: str | None = None,
+    assinaturas: list[dict] | None = None,
     task_id: str | None = None,
 ) -> dict:
     template = Template.objects.get(id=template_id)
@@ -30,6 +32,12 @@ def _do_generate_relatorio(
         programa_id=programa_id,
         projeto_id=projeto_id,
         evento_id=evento_id,
+    )
+
+    # Assinaturas congeladas no metadados (o download não tem escopo para
+    # re-resolver). Sem override, usa as do template.
+    context["sistema.assinaturas"] = resolver_assinaturas(
+        template_id, assinaturas_override=assinaturas
     )
 
     # Sem documento_json explícito (ex.: relatório agendado), resolve as
@@ -71,6 +79,7 @@ def generate_relatorio(
     template_id: int,
     documento_json: dict | None = None,
     nome: str | None = None,
+    assinaturas: list[dict] | None = None,
 ) -> dict:
     try:
         return _do_generate_relatorio(
@@ -81,6 +90,7 @@ def generate_relatorio(
             template_id=template_id,
             documento_json=documento_json,
             nome=nome,
+            assinaturas=assinaturas,
             task_id=self.request.id,
         )
     except Exception:

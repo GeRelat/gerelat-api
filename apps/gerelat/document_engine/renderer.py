@@ -245,6 +245,46 @@ def _render_cabecalho_logos(
         p.add_run().add_picture(s_parceira, height=Mm(_LOGO_ALTURA_MM))
 
 
+# ── Bloco de assinaturas (fim do documento) ─────────────────────
+
+_ASSINATURA_LINHA = "_" * 40
+
+
+def assinaturas_de_metadados(metadados: dict) -> list[dict]:
+    """Lista de assinaturas congelada em `Relatorio.metadados` (ver
+    `services.assinaturas_relatorio.resolver_assinaturas`)."""
+    return (metadados or {}).get("sistema.assinaturas") or []
+
+
+def _render_assinaturas(doc: Any, assinaturas: list[dict] | None) -> None:
+    """Renderiza, ao final do documento, um bloco por signatário: linha para
+    assinar, nome em negrito e cargo, tudo centralizado."""
+    if not assinaturas:
+        return
+
+    doc.add_paragraph()
+    for assinatura in assinaturas:
+        nome = (assinatura.get("nome") or "").strip()
+        if not nome:
+            continue
+        cargo = (assinatura.get("cargo") or "").strip()
+        equipe = (assinatura.get("nome_equipe") or "").strip()
+
+        linha = doc.add_paragraph(_ASSINATURA_LINHA)
+        linha.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        linha.paragraph_format.space_before = Pt(28)
+
+        p_nome = doc.add_paragraph(nome)
+        p_nome.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in p_nome.runs:
+            run.bold = True
+
+        for texto in (cargo, equipe):
+            if texto:
+                p = doc.add_paragraph(texto)
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+
 # ── Main entry point ──────────────────────────────────────────────
 
 
@@ -253,6 +293,7 @@ def prosemirror_to_docx(
     *,
     logo_cliente_id: Any = None,
     logo_parceira_id: Any = None,
+    assinaturas: list[dict] | None = None,
 ) -> BytesIO:
     """
     Convert a resolved ProseMirror JSON document (after placeholder replacement)
@@ -260,6 +301,7 @@ def prosemirror_to_docx(
 
     `logo_cliente_id` / `logo_parceira_id`: ids de Asset opcionais para o
     cabeçalho de página (cliente à esquerda, parceira à direita).
+    `assinaturas`: lista `[{nome, cargo, nome_equipe}]` renderada ao final.
     """
     doc = Document()
 
@@ -269,6 +311,8 @@ def prosemirror_to_docx(
 
     for node in pm_json.get("content", []):
         _render_block(doc, node)
+
+    _render_assinaturas(doc, assinaturas)
 
     buf = BytesIO()
     doc.save(buf)

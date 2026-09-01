@@ -11,12 +11,15 @@ from rest_framework.test import APIClient, APIRequestFactory
 from apps.gerelat.enums import CampoTipo, NivelAplicacao, NivelTemplate
 from apps.gerelat.models import (
     AgendamentoRelatorio,
+    AssinaturaTemplate,
     Asset,
     AssetUso,
     CampoDefinicao,
     CampoValor,
     ClasseEvento,
     Cliente,
+    EquipePrograma,
+    EquipeProjeto,
     Evento,
     MembroCliente,
     MembroGeRelat,
@@ -1798,4 +1801,187 @@ class CabecalhoLogosTest(TestCase):
         self.assertEqual(
             rel.metadados["sistema.cabecalho.logo_cliente_asset_id"],
             self.cli.logomarca_id,
+        )
+
+
+class AssinaturasRelatorioTest(TestCase):
+    """Bloco de assinaturas ao final do .docx (document_engine.renderer) +
+    resolução dos signatários (services.assinaturas_relatorio) + congelamento em
+    Relatorio.metadados."""
+
+    _DOC = {"type": "doc", "content": [{"type": "paragraph", "content": []}]}
+
+    @staticmethod
+    def _abrir_docx(buf):
+        from io import BytesIO
+
+        from docx import Document
+
+        return Document(BytesIO(buf.getvalue()))
+
+    def setUp(self):
+        self.cli = Cliente.objects.create(
+            nome="Cli",
+            cnpj="11111111111111",
+            nome_contato="c",
+            email_contato="c@c.com",
+            fone_contato="1",
+            numero_contrato="1",
+            data_termino_contrato="2030-01-01",
+        )
+        self.prog = Programa.objects.create(nome="Prog", cliente=self.cli)
+        self.proj = Projeto.objects.create(nome="Proj", programa=self.prog)
+        self.eq_prog = EquipePrograma.objects.create(
+            programa=self.prog, nome="João da Silva", cargo="Coordenador"
+        )
+        self.eq_proj = EquipeProjeto.objects.create(
+            projeto=self.proj,
+            nome_equipe="Comissão",
+            nome="Maria Souza",
+            cargo="Diretora",
+        )
+        self.template = Template.objects.create(
+            projeto=self.proj,
+            nivel=NivelTemplate.PROJETO,
+            nome="T",
+            modelo_json=self._DOC,
+        )
+
+    # ── renderer ─────────────────────────────────────────────────
+
+    def test_render_assinaturas_no_fim(self):
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        doc = self._abrir_docx(
+            prosemirror_to_docx(
+                self._DOC,
+                assinaturas=[
+                    {"nome": "João da Silva", "cargo": "Coordenador", "nome_equipe": ""},
+                    {"nome": "Maria Souza", "cargo": "Diretora", "nome_equipe": "Comissão"},
+                ],
+            )
+        )
+        textos = [p.text for p in doc.paragraphs]
+        blob = "\n".join(textos)
+        self.assertIn("_" * 40, blob)
+        self.assertIn("João da Silva", blob)
+        self.assertIn("Coordenador", blob)
+        self.assertIn("Maria Souza", blob)
+        self.assertIn("Comissão", blob)
+        # duas linhas de assinatura
+        self.assertEqual(textos.count("_" * 40), 2)
+
+    def test_sem_assinaturas_nao_gera_linha(self):
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        doc = self._abrir_docx(prosemirror_to_docx(self._DOC))
+        self.assertNotIn("_" * 40, "\n".join(p.text for p in doc.paragraphs))
+
+    # ── resolver_assinaturas ─────────────────────────────────────
+
+    def test_resolver_do_template(self):
+        from apps.gerelat.services.assinaturas_relatorio import resolver_assinaturas
+
+        AssinaturaTemplate.objects.create(
+            template=self.template, equipe_programa=self.eq_prog
+        )
+        AssinaturaTemplate.objects.create(
+            template=self.template, equipe_projeto=self.eq_proj
+        )
+        linhas = resolver_assinaturas(self.template.id)
+        self.assertEqual(
+            linhas,
+            [
+                {"nome": "João da Silva", "cargo": "Coordenador", "nome_equipe": ""},
+                {
+                    "nome": "Maria Souza",
+                    "cargo": "Diretora",
+                    "nome_equipe": "Comissão",
+                },
+            ],
+        )
+
+    def test_resolver_com_override(self):
+        from apps.gerelat.services.assinaturas_relatorio import resolver_assinaturas
+
+        AssinaturaTemplate.objects.create(
+            template=self.template, equipe_programa=self.eq_prog
+        )
+        linhas = resolver_assinaturas(
+            self.template.id,
+            assinaturas_override=[{"equipe_projeto": self.eq_proj.id}],
+        )
+        self.assertEqual([linha["nome"] for linha in linhas], ["Maria Souza"])
+
+    # ── geração / metadados ──────────────────────────────────────
+
+    def test_geracao_congela_assinaturas(self):
+        from apps.gerelat.tasks import _do_generate_relatorio
+
+        AssinaturaTemplate.objects.create(
+            template=self.template, equipe_programa=self.eq_prog
+        )
+        resultado = _do_generate_relatorio(
+            projeto_id=self.proj.id, template_id=self.template.id
+        )
+        rel = Relatorio.objects.get(id=resultado["id"])
+        self.assertEqual(
+            rel.metadados["sistema.assinaturas"],
+            [{"nome": "João da Silva", "cargo": "Coordenador", "nome_equipe": ""}],
+        )
+
+    # ── serializer ───────────────────────────────────────────────
+
+    def test_serializer_rejeita_duas_equipes(self):
+        from apps.gerelat.serializers import RelatorioGenerateRequestSerializer
+
+        s = RelatorioGenerateRequestSerializer(
+            data={
+                "template": self.template.id,
+                "projeto": self.proj.id,
+                "assinaturas": [
+                    {
+                        "equipe_programa": self.eq_prog.id,
+                        "equipe_projeto": self.eq_proj.id,
+                    }
+                ],
+            }
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("assinaturas", s.errors)
+
+    def test_serializer_rejeita_equipe_de_outro_cliente(self):
+        from apps.gerelat.serializers import RelatorioGenerateRequestSerializer
+
+        outro_cli = Cliente.objects.create(
+            nome="Outro",
+            cnpj="22222222222222",
+            nome_contato="o",
+            email_contato="o@o.com",
+            fone_contato="2",
+            numero_contrato="2",
+            data_termino_contrato="2030-01-01",
+        )
+        outro_prog = Programa.objects.create(nome="OutroP", cliente=outro_cli)
+        eq_estranha = EquipePrograma.objects.create(
+            programa=outro_prog, nome="Fulano", cargo="X"
+        )
+        s = RelatorioGenerateRequestSerializer(
+            data={
+                "template": self.template.id,
+                "projeto": self.proj.id,
+                "assinaturas": [{"equipe_programa": eq_estranha.id}],
+            }
+        )
+        self.assertFalse(s.is_valid())
+
+    # ── regressão do on_delete (2.5) ─────────────────────────────
+
+    def test_excluir_membro_com_assinatura_nao_estoura(self):
+        AssinaturaTemplate.objects.create(
+            template=self.template, equipe_programa=self.eq_prog
+        )
+        self.eq_prog.delete()
+        self.assertFalse(
+            AssinaturaTemplate.objects.filter(template=self.template).exists()
         )

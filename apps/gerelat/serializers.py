@@ -897,6 +897,26 @@ class RelatorioGenerateRequestSerializer(serializers.Serializer):
         allow_null=True,
         help_text="Documento ProseMirror já resolvido e editado pelo usuário (opcional)",
     )
+    assinaturas = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        default=list,
+        help_text=(
+            "Signatários deste relatório: lista de {equipe_programa: id} ou "
+            "{equipe_projeto: id}. Vazio = usa as assinaturas do template."
+        ),
+    )
+
+    def validate_assinaturas(self, value):
+        for item in value:
+            tem_programa = bool(item.get("equipe_programa"))
+            tem_projeto = bool(item.get("equipe_projeto"))
+            if tem_programa == tem_projeto:
+                raise serializers.ValidationError(
+                    "Cada assinatura deve ter exatamente um de "
+                    "equipe_programa / equipe_projeto."
+                )
+        return value
 
     def validate(self, attrs):
         template = attrs["template"]
@@ -978,8 +998,56 @@ class RelatorioGenerateRequestSerializer(serializers.Serializer):
                 f"Este template exige informar {required_nivel} para gerar o relatório."
             )
 
+        self._validar_assinaturas_no_escopo(
+            attrs.get("assinaturas") or [], cliente, programa, projeto, template
+        )
+
         attrs["cliente"] = cliente
         attrs["programa"] = programa
         attrs["projeto"] = projeto
         attrs["evento"] = evento
         return attrs
+
+    def _validar_assinaturas_no_escopo(
+        self, assinaturas, cliente, programa, projeto, template
+    ):
+        if not assinaturas:
+            return
+
+        cliente_alvo = (
+            cliente
+            or template.cliente
+            or (template.programa.cliente if template.programa_id else None)
+            or (template.projeto.programa.cliente if template.projeto_id else None)
+        )
+        prog_ids = {
+            i["equipe_programa"] for i in assinaturas if i.get("equipe_programa")
+        }
+        proj_ids = {
+            i["equipe_projeto"] for i in assinaturas if i.get("equipe_projeto")
+        }
+
+        equipes_prog = EquipePrograma.objects.filter(id__in=prog_ids).select_related(
+            "programa"
+        )
+        equipes_proj = EquipeProjeto.objects.filter(
+            id__in=proj_ids
+        ).select_related("projeto__programa")
+
+        if equipes_prog.count() != len(prog_ids) or equipes_proj.count() != len(
+            proj_ids
+        ):
+            raise serializers.ValidationError("Assinatura com equipe inexistente.")
+
+        if cliente_alvo is None:
+            return
+        for equipe in equipes_prog:
+            if equipe.programa.cliente_id != cliente_alvo.id:
+                raise serializers.ValidationError(
+                    "Signatário fora do escopo do relatório."
+                )
+        for equipe in equipes_proj:
+            if equipe.projeto.programa.cliente_id != cliente_alvo.id:
+                raise serializers.ValidationError(
+                    "Signatário fora do escopo do relatório."
+                )
