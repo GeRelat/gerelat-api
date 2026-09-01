@@ -748,16 +748,19 @@ class AssinaturaTemplate(models.Model):
         on_delete=models.CASCADE,
         related_name="assinaturas_template",
     )
+    # CASCADE (não SET_NULL): a linha exige exatamente uma equipe preenchida
+    # (CheckConstraint abaixo); nular a FK ao excluir o membro deixaria as duas
+    # nulas e quebraria a constraint no DB.
     equipe_programa = models.ForeignKey(
         EquipePrograma,
-        on_delete=models.SET_NULL,
+        on_delete=models.CASCADE,
         related_name="assinaturas_template",
         null=True,
         blank=True,
     )
     equipe_projeto = models.ForeignKey(
         EquipeProjeto,
-        on_delete=models.SET_NULL,
+        on_delete=models.CASCADE,
         related_name="assinaturas_template",
         null=True,
         blank=True,

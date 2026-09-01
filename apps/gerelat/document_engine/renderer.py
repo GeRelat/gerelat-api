@@ -8,6 +8,7 @@ from io import BytesIO
 from typing import Any
 
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Mm, Pt, RGBColor
 
 # ── Inline helpers ────────────────────────────────────────────────
@@ -120,6 +121,22 @@ def _render_custom_text(doc: Any, node: dict) -> None:
         _render_block(doc, child)
 
 
+# Nós de variável (bloco) que chegam aqui só quando não foram resolvidos —
+# variável sem valor. Renderiza o placeholder [ref] em vez de sumir com ele.
+_UNRESOLVED_BLOCK_VAR_TYPES = {
+    "var_richtext",
+    "var_image",
+    "image_ref",
+    "var_table",
+    "table_ref",
+}
+
+
+def _render_unresolved_var(doc: Any, node: dict) -> None:
+    ref = node.get("attrs", {}).get("ref", "")
+    doc.add_paragraph(f"[{ref}]" if ref else "[variável não resolvida]")
+
+
 def _render_block(doc: Any, node: dict) -> None:
     node_type = node.get("type")
     if node_type == "paragraph":
@@ -136,13 +153,29 @@ def _render_block(doc: Any, node: dict) -> None:
         _render_image_block(doc, node)
     elif node_type == "custom_text":
         _render_custom_text(doc, node)
+    elif node_type in _UNRESOLVED_BLOCK_VAR_TYPES:
+        _render_unresolved_var(doc, node)
     # Outros tipos são silenciosamente ignorados
 
 
-def _render_image_block(doc: Any, node: dict) -> None:
-    from django.apps import apps
-    from django.core.files.storage import default_storage
+def _abrir_asset_stream(asset_id: Any) -> BytesIO | None:
+    """Abre o arquivo de um Asset como BytesIO (seekable, reutilizável), ou None
+    se o id for vazio ou o arquivo não puder ser lido."""
+    if not asset_id:
+        return None
+    try:
+        from django.apps import apps
+        from django.core.files.storage import default_storage
 
+        Asset = apps.get_model("gerelat", "Asset")
+        asset = Asset.objects.get(pk=asset_id)
+        with default_storage.open(str(asset.arquivo), "rb") as f:
+            return BytesIO(f.read())
+    except Exception:
+        return None
+
+
+def _render_image_block(doc: Any, node: dict) -> None:
     attrs = node.get("attrs", {})
     asset_id = attrs.get("asset_id")
     width_mm = attrs.get("width_mm")
@@ -152,30 +185,134 @@ def _render_image_block(doc: Any, node: dict) -> None:
         doc.add_paragraph("[imagem não encontrada]")
         return
 
-    try:
-        Asset = apps.get_model("gerelat", "Asset")
-        asset = Asset.objects.get(pk=asset_id)
-        with default_storage.open(str(asset.arquivo), "rb") as f:
-            width = Mm(float(width_mm)) if width_mm else None
-            doc.add_picture(f, width=width)
-        if caption:
-            doc.add_paragraph(caption)
-    except Exception:
+    stream = _abrir_asset_stream(asset_id)
+    if stream is None:
         doc.add_paragraph(f"[erro ao carregar imagem #{asset_id}]")
+        return
+
+    width = Mm(float(width_mm)) if width_mm else None
+    doc.add_picture(stream, width=width)
+    if caption:
+        doc.add_paragraph(caption)
+
+
+# ── Cabeçalho com logomarcas ─────────────────────────────────────
+
+# Altura alvo das logomarcas no cabeçalho — mesma altura nas duas, largura
+# proporcional, para alinharem independentemente da proporção de cada arquivo.
+_LOGO_ALTURA_MM = 16
+
+
+def logos_cabecalho_de_metadados(metadados: dict) -> dict:
+    """Extrai os ids das logomarcas de cliente/parceira congelados em
+    `Relatorio.metadados` (ver `build_variables_context`)."""
+    metadados = metadados or {}
+    return {
+        "logo_cliente_id": metadados.get("sistema.cabecalho.logo_cliente_asset_id"),
+        "logo_parceira_id": metadados.get("sistema.cabecalho.logo_parceira_asset_id"),
+    }
+
+
+def _render_cabecalho_logos(
+    doc: Any,
+    *,
+    logo_cliente_id: Any = None,
+    logo_parceira_id: Any = None,
+) -> None:
+    """Cabeçalho de página: logomarca do cliente à esquerda, da parceira à
+    direita. Omitido inteiro se nenhuma das duas existir."""
+    s_cliente = _abrir_asset_stream(logo_cliente_id)
+    s_parceira = _abrir_asset_stream(logo_parceira_id)
+    if s_cliente is None and s_parceira is None:
+        return
+
+    section = doc.sections[0]
+    header = section.header
+    header.is_linked_to_previous = False
+    header.paragraphs[0].text = ""
+
+    largura = section.page_width - section.left_margin - section.right_margin
+    tabela = header.add_table(rows=1, cols=2, width=largura)
+    celula_esq, celula_dir = tabela.rows[0].cells
+
+    if s_cliente is not None:
+        p = celula_esq.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        p.add_run().add_picture(s_cliente, height=Mm(_LOGO_ALTURA_MM))
+    if s_parceira is not None:
+        p = celula_dir.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        p.add_run().add_picture(s_parceira, height=Mm(_LOGO_ALTURA_MM))
+
+
+# ── Bloco de assinaturas (fim do documento) ─────────────────────
+
+_ASSINATURA_LINHA = "_" * 40
+
+
+def assinaturas_de_metadados(metadados: dict) -> list[dict]:
+    """Lista de assinaturas congelada em `Relatorio.metadados` (ver
+    `services.assinaturas_relatorio.resolver_assinaturas`)."""
+    return (metadados or {}).get("sistema.assinaturas") or []
+
+
+def _render_assinaturas(doc: Any, assinaturas: list[dict] | None) -> None:
+    """Renderiza, ao final do documento, um bloco por signatário: linha para
+    assinar, nome em negrito e cargo, tudo centralizado."""
+    if not assinaturas:
+        return
+
+    doc.add_paragraph()
+    for assinatura in assinaturas:
+        nome = (assinatura.get("nome") or "").strip()
+        if not nome:
+            continue
+        cargo = (assinatura.get("cargo") or "").strip()
+        equipe = (assinatura.get("nome_equipe") or "").strip()
+
+        linha = doc.add_paragraph(_ASSINATURA_LINHA)
+        linha.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        linha.paragraph_format.space_before = Pt(28)
+
+        p_nome = doc.add_paragraph(nome)
+        p_nome.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in p_nome.runs:
+            run.bold = True
+
+        for texto in (cargo, equipe):
+            if texto:
+                p = doc.add_paragraph(texto)
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 
 # ── Main entry point ──────────────────────────────────────────────
 
 
-def prosemirror_to_docx(pm_json: dict) -> BytesIO:
+def prosemirror_to_docx(
+    pm_json: dict,
+    *,
+    logo_cliente_id: Any = None,
+    logo_parceira_id: Any = None,
+    assinaturas: list[dict] | None = None,
+) -> BytesIO:
     """
     Convert a resolved ProseMirror JSON document (after placeholder replacement)
     to a python-docx Document and return it as a BytesIO buffer.
+
+    `logo_cliente_id` / `logo_parceira_id`: ids de Asset opcionais para o
+    cabeçalho de página (cliente à esquerda, parceira à direita).
+    `assinaturas`: lista `[{nome, cargo, nome_equipe}]` renderada ao final.
     """
     doc = Document()
 
+    _render_cabecalho_logos(
+        doc, logo_cliente_id=logo_cliente_id, logo_parceira_id=logo_parceira_id
+    )
+
     for node in pm_json.get("content", []):
         _render_block(doc, node)
+
+    _render_assinaturas(doc, assinaturas)
 
     buf = BytesIO()
     doc.save(buf)

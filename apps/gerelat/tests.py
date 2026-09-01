@@ -11,12 +11,15 @@ from rest_framework.test import APIClient, APIRequestFactory
 from apps.gerelat.enums import CampoTipo, NivelAplicacao, NivelTemplate
 from apps.gerelat.models import (
     AgendamentoRelatorio,
+    AssinaturaTemplate,
     Asset,
     AssetUso,
     CampoDefinicao,
     CampoValor,
     ClasseEvento,
     Cliente,
+    EquipePrograma,
+    EquipeProjeto,
     Evento,
     MembroCliente,
     MembroGeRelat,
@@ -24,6 +27,7 @@ from apps.gerelat.models import (
     MembroProjeto,
     Programa,
     Projeto,
+    Relatorio,
     Template,
     TemplateClasseEvento,
 )
@@ -1464,3 +1468,520 @@ class AgendamentoRelatorioAPITest(TestCase):
             AgendamentoRelatorio.objects.filter(id=agendamento_id).exists()
         )
         self.assertFalse(PeriodicTask.objects.filter(id=pt_id).exists())
+
+
+class TextoRicoAninhadoTest(TestCase):
+    """Resolução recursiva de variáveis dentro do valor de um texto rico
+    (document_engine.converters) + propagação de escopo (document_engine.scope)
+    + guardas de validação (document_engine.validators)."""
+
+    def _doc(self, *blocos):
+        return {"type": "doc", "content": list(blocos)}
+
+    def _par(self, *inline):
+        return {"type": "paragraph", "content": list(inline)}
+
+    def _txt(self, texto):
+        return {"type": "text", "text": texto}
+
+    def _var_text(self, ref):
+        return {"type": "var_text", "attrs": {"ref": ref}}
+
+    # ── converters.replace_placeholders ────────────────────────────
+
+    def test_var_text_dentro_de_valor_richtext_resolve(self):
+        from apps.gerelat.document_engine.converters import replace_placeholders
+
+        template = self._doc({"type": "var_richtext", "attrs": {"ref": "texto_padrao"}})
+        variables = {
+            "texto_padrao": self._doc(
+                self._par(
+                    self._txt("Parceira: "),
+                    self._var_text("nome_parceira"),
+                    self._txt("."),
+                )
+            ),
+            "nome_parceira": "FURG",
+        }
+
+        resultado = replace_placeholders(template, variables)
+        inline = resultado["content"][0]["content"]
+        self.assertEqual(
+            [n.get("text") for n in inline if n.get("type") == "text"],
+            ["Parceira: ", "FURG", "."],
+        )
+        self.assertFalse(any(n.get("type") == "var_text" for n in inline))
+
+    def test_sistema_dentro_de_valor_richtext_resolve(self):
+        from apps.gerelat.document_engine.converters import replace_placeholders
+
+        template = self._doc({"type": "var_richtext", "attrs": {"ref": "texto_padrao"}})
+        variables = {
+            "texto_padrao": self._doc(
+                self._par(
+                    self._txt("Evento "),
+                    self._var_text("sistema.evento.nome"),
+                    self._txt("."),
+                )
+            ),
+            "sistema.evento.nome": "Oficina",
+        }
+
+        resultado = replace_placeholders(template, variables)
+        textos = [
+            n["text"]
+            for n in resultado["content"][0]["content"]
+            if n.get("type") == "text"
+        ]
+        self.assertEqual(textos, ["Evento ", "Oficina", "."])
+
+    def test_ciclo_richtext_nao_estoura_pilha(self):
+        from apps.gerelat.document_engine.converters import replace_placeholders
+
+        template = self._doc({"type": "var_richtext", "attrs": {"ref": "a"}})
+        variables = {
+            "a": self._doc({"type": "var_richtext", "attrs": {"ref": "b"}}),
+            "b": self._doc({"type": "var_richtext", "attrs": {"ref": "a"}}),
+        }
+
+        resultado = replace_placeholders(template, variables)
+        texto_plano = str(resultado)
+        self.assertIn("ciclo de variáveis", texto_plano)
+
+    def test_var_richtext_sem_valor_mantem_placeholder(self):
+        from apps.gerelat.document_engine.converters import replace_placeholders
+
+        template = self._doc({"type": "var_richtext", "attrs": {"ref": "x"}})
+        resultado = replace_placeholders(template, {})
+        self.assertEqual(resultado["content"][0]["type"], "var_richtext")
+
+    # ── validators.validate_richtext ──────────────────────────────
+
+    def test_validate_richtext_rejeita_richtext_aninhado(self):
+        from django.core.exceptions import ValidationError
+
+        from apps.gerelat.document_engine.validators import validate_richtext
+
+        with self.assertRaises(ValidationError):
+            validate_richtext(
+                self._doc({"type": "var_richtext", "attrs": {"ref": "outro"}})
+            )
+
+    def test_validate_richtext_rejeita_custom_text(self):
+        from django.core.exceptions import ValidationError
+
+        from apps.gerelat.document_engine.validators import validate_richtext
+
+        with self.assertRaises(ValidationError):
+            validate_richtext(
+                self._doc(
+                    {
+                        "type": "custom_text",
+                        "attrs": {"label": "bloco"},
+                        "content": [self._par(self._txt("x"))],
+                    }
+                )
+            )
+
+    def test_validate_richtext_rejeita_var_sem_ref(self):
+        from django.core.exceptions import ValidationError
+
+        from apps.gerelat.document_engine.validators import validate_richtext
+
+        with self.assertRaises(ValidationError):
+            validate_richtext(
+                self._doc(self._par({"type": "var_text", "attrs": {"ref": ""}}))
+            )
+
+    def test_validate_richtext_aceita_var_text_com_ref(self):
+        from apps.gerelat.document_engine.validators import validate_richtext
+
+        validate_richtext(
+            self._doc(self._par(self._txt("oi "), self._var_text("nome_parceira")))
+        )
+
+    # ── scope.scan_required_nivel (propagação transitiva) ─────────
+
+    def test_scan_required_nivel_propaga_por_valor_richtext(self):
+        from apps.gerelat.document_engine.scope import scan_required_nivel
+
+        cli = Cliente.objects.create(
+            nome="Brisa",
+            cnpj="11111111111111",
+            nome_contato="C1",
+            email_contato="c1@c.com",
+            fone_contato="1111",
+            numero_contrato="101",
+            data_termino_contrato="2030-01-01",
+        )
+        prog = Programa.objects.create(nome="TIC55", cliente=cli)
+
+        definicao = CampoDefinicao.objects.create(
+            programa=prog,
+            nivel_aplicacao=NivelAplicacao.PROGRAMA,
+            referencia="texto_padrao",
+            descricao="d",
+            tipo=CampoTipo.RICHTEXT,
+        )
+        CampoValor.objects.create(
+            definicao=definicao,
+            programa=prog,
+            valor=self._doc(
+                self._par(
+                    self._txt("Evento "),
+                    self._var_text("sistema.evento.nome"),
+                )
+            ),
+        )
+
+        template_json = self._doc(
+            {"type": "var_richtext", "attrs": {"ref": "texto_padrao"}}
+        )
+
+        # Sem a expansão transitiva, o template só cita "texto_padrao" (programa).
+        nivel = scan_required_nivel(template_json, cliente=cli, programa=prog)
+        self.assertEqual(nivel, "evento")
+
+
+class CabecalhoLogosTest(TestCase):
+    """Cabeçalho de página do .docx com as logomarcas do cliente e da parceira
+    (document_engine.renderer + document_engine.variables)."""
+
+    @staticmethod
+    def _png_bytes(size, cor) -> bytes:
+        from io import BytesIO
+
+        from PIL import Image
+
+        buf = BytesIO()
+        Image.new("RGB", size, cor).save(buf, "PNG")
+        return buf.getvalue()
+
+    def _asset(self, size=(16, 16), cor="red"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        return Asset.objects.create(
+            arquivo=SimpleUploadedFile(
+                "logo.png",
+                self._png_bytes(size, cor),
+                content_type="image/png",
+            ),
+            cliente=self.cli,
+        )
+
+    @staticmethod
+    def _abrir_docx(buf):
+        from io import BytesIO
+
+        from docx import Document
+
+        return Document(BytesIO(buf.getvalue()))
+
+    @staticmethod
+    def _imagens_no_cabecalho(doc) -> int:
+        header = doc.sections[0].header
+        return sum(
+            1 for r in header.part.rels.values() if "image" in r.reltype
+        )
+
+    def setUp(self):
+        import tempfile
+
+        from django.test import override_settings
+
+        self._media = tempfile.mkdtemp()
+        cm = override_settings(MEDIA_ROOT=self._media)
+        cm.enable()
+        self.addCleanup(cm.disable)
+
+        self.cli = Cliente.objects.create(
+            nome="Cliente Logo",
+            cnpj="11111111111111",
+            nome_contato="C",
+            email_contato="c@c.com",
+            fone_contato="1",
+            numero_contrato="1",
+            data_termino_contrato="2030-01-01",
+        )
+        self.prog = Programa.objects.create(nome="Prog", cliente=self.cli)
+        self.proj = Projeto.objects.create(nome="Proj", programa=self.prog)
+
+    _DOC = {"type": "doc", "content": [{"type": "paragraph", "content": []}]}
+
+    # ── renderer ─────────────────────────────────────────────────
+
+    def test_sem_logos_nao_cria_cabecalho(self):
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        doc = self._abrir_docx(prosemirror_to_docx(self._DOC))
+        self.assertEqual(len(doc.sections[0].header.tables), 0)
+        self.assertEqual(self._imagens_no_cabecalho(doc), 0)
+
+    def test_duas_logos_no_cabecalho(self):
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        a1 = self._asset(size=(16, 16), cor="red")
+        a2 = self._asset(size=(24, 12), cor="blue")
+        doc = self._abrir_docx(
+            prosemirror_to_docx(
+                self._DOC, logo_cliente_id=a1.id, logo_parceira_id=a2.id
+            )
+        )
+        self.assertEqual(len(doc.sections[0].header.tables), 1)
+        self.assertEqual(self._imagens_no_cabecalho(doc), 2)
+
+    def test_so_cliente_uma_logo(self):
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        a1 = self._asset()
+        doc = self._abrir_docx(
+            prosemirror_to_docx(
+                self._DOC, logo_cliente_id=a1.id, logo_parceira_id=None
+            )
+        )
+        self.assertEqual(len(doc.sections[0].header.tables), 1)
+        self.assertEqual(self._imagens_no_cabecalho(doc), 1)
+
+    def test_asset_id_invalido_nao_quebra(self):
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        doc = self._abrir_docx(
+            prosemirror_to_docx(
+                self._DOC, logo_cliente_id=999999, logo_parceira_id=None
+            )
+        )
+        self.assertEqual(len(doc.sections[0].header.tables), 0)
+
+    # ── variables / metadados ────────────────────────────────────
+
+    def test_build_variables_context_congela_asset_ids(self):
+        from apps.gerelat.document_engine.variables import build_variables_context
+
+        logo = self._asset()
+        self.cli.logomarca = logo
+        self.cli.save()
+        logo_proj = self._asset()
+        self.proj.logomarca = logo_proj
+        self.proj.save()
+
+        ctx = build_variables_context(projeto_id=self.proj.id)
+        self.cli.refresh_from_db()
+        self.proj.refresh_from_db()
+        self.assertEqual(
+            ctx["sistema.cabecalho.logo_cliente_asset_id"], self.cli.logomarca_id
+        )
+        self.assertEqual(
+            ctx["sistema.cabecalho.logo_parceira_asset_id"], self.proj.logomarca_id
+        )
+
+    def test_context_sem_projeto_parceira_none(self):
+        from apps.gerelat.document_engine.variables import build_variables_context
+
+        ctx = build_variables_context(cliente_id=self.cli.id)
+        self.assertIsNone(ctx["sistema.cabecalho.logo_parceira_asset_id"])
+
+    def test_geracao_grava_asset_ids_em_metadados(self):
+        from apps.gerelat.tasks import _do_generate_relatorio
+
+        logo = self._asset()
+        self.cli.logomarca = logo
+        self.cli.save()
+
+        template = Template.objects.create(
+            programa=self.prog,
+            nivel=NivelTemplate.PROGRAMA,
+            nome="T",
+            modelo_json=self._DOC,
+        )
+        resultado = _do_generate_relatorio(
+            programa_id=self.prog.id, template_id=template.id
+        )
+        rel = Relatorio.objects.get(id=resultado["id"])
+        self.cli.refresh_from_db()
+        self.assertEqual(
+            rel.metadados["sistema.cabecalho.logo_cliente_asset_id"],
+            self.cli.logomarca_id,
+        )
+
+
+class AssinaturasRelatorioTest(TestCase):
+    """Bloco de assinaturas ao final do .docx (document_engine.renderer) +
+    resolução dos signatários (services.assinaturas_relatorio) + congelamento em
+    Relatorio.metadados."""
+
+    _DOC = {"type": "doc", "content": [{"type": "paragraph", "content": []}]}
+
+    @staticmethod
+    def _abrir_docx(buf):
+        from io import BytesIO
+
+        from docx import Document
+
+        return Document(BytesIO(buf.getvalue()))
+
+    def setUp(self):
+        self.cli = Cliente.objects.create(
+            nome="Cli",
+            cnpj="11111111111111",
+            nome_contato="c",
+            email_contato="c@c.com",
+            fone_contato="1",
+            numero_contrato="1",
+            data_termino_contrato="2030-01-01",
+        )
+        self.prog = Programa.objects.create(nome="Prog", cliente=self.cli)
+        self.proj = Projeto.objects.create(nome="Proj", programa=self.prog)
+        self.eq_prog = EquipePrograma.objects.create(
+            programa=self.prog, nome="João da Silva", cargo="Coordenador"
+        )
+        self.eq_proj = EquipeProjeto.objects.create(
+            projeto=self.proj,
+            nome_equipe="Comissão",
+            nome="Maria Souza",
+            cargo="Diretora",
+        )
+        self.template = Template.objects.create(
+            projeto=self.proj,
+            nivel=NivelTemplate.PROJETO,
+            nome="T",
+            modelo_json=self._DOC,
+        )
+
+    # ── renderer ─────────────────────────────────────────────────
+
+    def test_render_assinaturas_no_fim(self):
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        doc = self._abrir_docx(
+            prosemirror_to_docx(
+                self._DOC,
+                assinaturas=[
+                    {"nome": "João da Silva", "cargo": "Coordenador", "nome_equipe": ""},
+                    {"nome": "Maria Souza", "cargo": "Diretora", "nome_equipe": "Comissão"},
+                ],
+            )
+        )
+        textos = [p.text for p in doc.paragraphs]
+        blob = "\n".join(textos)
+        self.assertIn("_" * 40, blob)
+        self.assertIn("João da Silva", blob)
+        self.assertIn("Coordenador", blob)
+        self.assertIn("Maria Souza", blob)
+        self.assertIn("Comissão", blob)
+        # duas linhas de assinatura
+        self.assertEqual(textos.count("_" * 40), 2)
+
+    def test_sem_assinaturas_nao_gera_linha(self):
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        doc = self._abrir_docx(prosemirror_to_docx(self._DOC))
+        self.assertNotIn("_" * 40, "\n".join(p.text for p in doc.paragraphs))
+
+    # ── resolver_assinaturas ─────────────────────────────────────
+
+    def test_resolver_do_template(self):
+        from apps.gerelat.services.assinaturas_relatorio import resolver_assinaturas
+
+        AssinaturaTemplate.objects.create(
+            template=self.template, equipe_programa=self.eq_prog
+        )
+        AssinaturaTemplate.objects.create(
+            template=self.template, equipe_projeto=self.eq_proj
+        )
+        linhas = resolver_assinaturas(self.template.id)
+        self.assertEqual(
+            linhas,
+            [
+                {"nome": "João da Silva", "cargo": "Coordenador", "nome_equipe": ""},
+                {
+                    "nome": "Maria Souza",
+                    "cargo": "Diretora",
+                    "nome_equipe": "Comissão",
+                },
+            ],
+        )
+
+    def test_resolver_com_override(self):
+        from apps.gerelat.services.assinaturas_relatorio import resolver_assinaturas
+
+        AssinaturaTemplate.objects.create(
+            template=self.template, equipe_programa=self.eq_prog
+        )
+        linhas = resolver_assinaturas(
+            self.template.id,
+            assinaturas_override=[{"equipe_projeto": self.eq_proj.id}],
+        )
+        self.assertEqual([linha["nome"] for linha in linhas], ["Maria Souza"])
+
+    # ── geração / metadados ──────────────────────────────────────
+
+    def test_geracao_congela_assinaturas(self):
+        from apps.gerelat.tasks import _do_generate_relatorio
+
+        AssinaturaTemplate.objects.create(
+            template=self.template, equipe_programa=self.eq_prog
+        )
+        resultado = _do_generate_relatorio(
+            projeto_id=self.proj.id, template_id=self.template.id
+        )
+        rel = Relatorio.objects.get(id=resultado["id"])
+        self.assertEqual(
+            rel.metadados["sistema.assinaturas"],
+            [{"nome": "João da Silva", "cargo": "Coordenador", "nome_equipe": ""}],
+        )
+
+    # ── serializer ───────────────────────────────────────────────
+
+    def test_serializer_rejeita_duas_equipes(self):
+        from apps.gerelat.serializers import RelatorioGenerateRequestSerializer
+
+        s = RelatorioGenerateRequestSerializer(
+            data={
+                "template": self.template.id,
+                "projeto": self.proj.id,
+                "assinaturas": [
+                    {
+                        "equipe_programa": self.eq_prog.id,
+                        "equipe_projeto": self.eq_proj.id,
+                    }
+                ],
+            }
+        )
+        self.assertFalse(s.is_valid())
+        self.assertIn("assinaturas", s.errors)
+
+    def test_serializer_rejeita_equipe_de_outro_cliente(self):
+        from apps.gerelat.serializers import RelatorioGenerateRequestSerializer
+
+        outro_cli = Cliente.objects.create(
+            nome="Outro",
+            cnpj="22222222222222",
+            nome_contato="o",
+            email_contato="o@o.com",
+            fone_contato="2",
+            numero_contrato="2",
+            data_termino_contrato="2030-01-01",
+        )
+        outro_prog = Programa.objects.create(nome="OutroP", cliente=outro_cli)
+        eq_estranha = EquipePrograma.objects.create(
+            programa=outro_prog, nome="Fulano", cargo="X"
+        )
+        s = RelatorioGenerateRequestSerializer(
+            data={
+                "template": self.template.id,
+                "projeto": self.proj.id,
+                "assinaturas": [{"equipe_programa": eq_estranha.id}],
+            }
+        )
+        self.assertFalse(s.is_valid())
+
+    # ── regressão do on_delete (2.5) ─────────────────────────────
+
+    def test_excluir_membro_com_assinatura_nao_estoura(self):
+        AssinaturaTemplate.objects.create(
+            template=self.template, equipe_programa=self.eq_prog
+        )
+        self.eq_prog.delete()
+        self.assertFalse(
+            AssinaturaTemplate.objects.filter(template=self.template).exists()
+        )

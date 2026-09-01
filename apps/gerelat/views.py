@@ -31,7 +31,11 @@ from .document_engine.converters import (
     convert_docx_to_prosemirror,
     replace_placeholders,
 )
-from .document_engine.renderer import prosemirror_to_docx
+from .document_engine.renderer import (
+    assinaturas_de_metadados,
+    logos_cabecalho_de_metadados,
+    prosemirror_to_docx,
+)
 from .document_engine.system_fields import get_system_fields_for_level
 from .document_engine.utils import (
     build_docx_filename_and_content_disposition,
@@ -98,6 +102,7 @@ from .services.autorizacao import (
     get_nivel_acesso,
     get_nivel_acesso_programa,
 )
+from .services.assinaturas_relatorio import resolver_assinaturas
 from .services.eventos_relatorio import eventos_disponiveis_para_relatorio
 from .services.gestao_acesso import (
     ConflitoDeAcessoError,
@@ -570,9 +575,31 @@ class TemplateViewSet(viewsets.ModelViewSet):
     def download(self, request, pk=None):
         template = self.get_object()
 
-        if template.modelo_json:
-            rendered = replace_placeholders(template.modelo_json, {})
-            output_buffer = prosemirror_to_docx(rendered)
+        if not template.modelo_json:
+            return Response(
+                {"detail": "Template não possui modelo_json."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cliente = (
+            template.cliente
+            or (template.programa.cliente if template.programa_id else None)
+            or (
+                template.projeto.programa.cliente
+                if template.projeto_id
+                else None
+            )
+        )
+        extras = {
+            "logo_cliente_id": cliente.logomarca_id if cliente else None,
+            "logo_parceira_id": (
+                template.projeto.logomarca_id if template.projeto_id else None
+            ),
+            "assinaturas": resolver_assinaturas(template.id),
+        }
+
+        rendered = replace_placeholders(template.modelo_json, {})
+        output_buffer = prosemirror_to_docx(rendered, **extras)
 
         content_disp = build_docx_filename_and_content_disposition(template.nome)
         response = FileResponse(output_buffer, content_type=DOCX_ALLOWED_MIME)
@@ -1077,6 +1104,7 @@ class RelatorioViewSet(viewsets.ModelViewSet):
         evento = serializer.validated_data.get("evento")
         template = serializer.validated_data["template"]
         documento_json = serializer.validated_data.get("documento_json") or None
+        assinaturas = serializer.validated_data.get("assinaturas") or None
 
         task = cast(Any, generate_relatorio).delay(
             cliente_id=cliente.id if cliente else None,
@@ -1086,6 +1114,7 @@ class RelatorioViewSet(viewsets.ModelViewSet):
             template_id=template.id,
             documento_json=documento_json,
             nome=nome,
+            assinaturas=assinaturas,
         )
 
         return Response(
@@ -1109,13 +1138,18 @@ class RelatorioViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        extras = {
+            **logos_cabecalho_de_metadados(variables),
+            "assinaturas": assinaturas_de_metadados(variables),
+        }
+
         if relatorio.documento_json:
             # ── Documento já resolvido e editado pelo usuário ──
-            output_buffer = prosemirror_to_docx(relatorio.documento_json)
+            output_buffer = prosemirror_to_docx(relatorio.documento_json, **extras)
         elif template.modelo_json:
             # ── Resolução automática de variáveis ──────────────
             rendered = replace_placeholders(template.modelo_json, variables)
-            output_buffer = prosemirror_to_docx(rendered)
+            output_buffer = prosemirror_to_docx(rendered, **extras)
         else:
             # ── Legacy pipeline: docxtpl ───────────────────────
             context = build_render_context(variables)
