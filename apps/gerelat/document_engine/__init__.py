@@ -1,6 +1,6 @@
 from ..enums import CampoTipo
 from .converters import convert_docx_to_prosemirror, replace_placeholders
-from .renderer import prosemirror_to_docx
+from .renderer import logos_cabecalho_de_metadados, prosemirror_to_docx
 from .utils import (
     build_render_context,
     extract_text_from_value,
@@ -27,6 +27,7 @@ __all__ = [
     "replace_placeholders",
     # renderer
     "prosemirror_to_docx",
+    "logos_cabecalho_de_metadados",
     # legacy utils (docxtpl path)
     "extract_text_from_value",
     "build_render_context",

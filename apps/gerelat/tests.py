@@ -24,6 +24,7 @@ from apps.gerelat.models import (
     MembroProjeto,
     Programa,
     Projeto,
+    Relatorio,
     Template,
     TemplateClasseEvento,
 )
@@ -1637,3 +1638,164 @@ class TextoRicoAninhadoTest(TestCase):
         # Sem a expansão transitiva, o template só cita "texto_padrao" (programa).
         nivel = scan_required_nivel(template_json, cliente=cli, programa=prog)
         self.assertEqual(nivel, "evento")
+
+
+class CabecalhoLogosTest(TestCase):
+    """Cabeçalho de página do .docx com as logomarcas do cliente e da parceira
+    (document_engine.renderer + document_engine.variables)."""
+
+    @staticmethod
+    def _png_bytes(size, cor) -> bytes:
+        from io import BytesIO
+
+        from PIL import Image
+
+        buf = BytesIO()
+        Image.new("RGB", size, cor).save(buf, "PNG")
+        return buf.getvalue()
+
+    def _asset(self, size=(16, 16), cor="red"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        return Asset.objects.create(
+            arquivo=SimpleUploadedFile(
+                "logo.png",
+                self._png_bytes(size, cor),
+                content_type="image/png",
+            ),
+            cliente=self.cli,
+        )
+
+    @staticmethod
+    def _abrir_docx(buf):
+        from io import BytesIO
+
+        from docx import Document
+
+        return Document(BytesIO(buf.getvalue()))
+
+    @staticmethod
+    def _imagens_no_cabecalho(doc) -> int:
+        header = doc.sections[0].header
+        return sum(
+            1 for r in header.part.rels.values() if "image" in r.reltype
+        )
+
+    def setUp(self):
+        import tempfile
+
+        from django.test import override_settings
+
+        self._media = tempfile.mkdtemp()
+        cm = override_settings(MEDIA_ROOT=self._media)
+        cm.enable()
+        self.addCleanup(cm.disable)
+
+        self.cli = Cliente.objects.create(
+            nome="Cliente Logo",
+            cnpj="11111111111111",
+            nome_contato="C",
+            email_contato="c@c.com",
+            fone_contato="1",
+            numero_contrato="1",
+            data_termino_contrato="2030-01-01",
+        )
+        self.prog = Programa.objects.create(nome="Prog", cliente=self.cli)
+        self.proj = Projeto.objects.create(nome="Proj", programa=self.prog)
+
+    _DOC = {"type": "doc", "content": [{"type": "paragraph", "content": []}]}
+
+    # ── renderer ─────────────────────────────────────────────────
+
+    def test_sem_logos_nao_cria_cabecalho(self):
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        doc = self._abrir_docx(prosemirror_to_docx(self._DOC))
+        self.assertEqual(len(doc.sections[0].header.tables), 0)
+        self.assertEqual(self._imagens_no_cabecalho(doc), 0)
+
+    def test_duas_logos_no_cabecalho(self):
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        a1 = self._asset(size=(16, 16), cor="red")
+        a2 = self._asset(size=(24, 12), cor="blue")
+        doc = self._abrir_docx(
+            prosemirror_to_docx(
+                self._DOC, logo_cliente_id=a1.id, logo_parceira_id=a2.id
+            )
+        )
+        self.assertEqual(len(doc.sections[0].header.tables), 1)
+        self.assertEqual(self._imagens_no_cabecalho(doc), 2)
+
+    def test_so_cliente_uma_logo(self):
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        a1 = self._asset()
+        doc = self._abrir_docx(
+            prosemirror_to_docx(
+                self._DOC, logo_cliente_id=a1.id, logo_parceira_id=None
+            )
+        )
+        self.assertEqual(len(doc.sections[0].header.tables), 1)
+        self.assertEqual(self._imagens_no_cabecalho(doc), 1)
+
+    def test_asset_id_invalido_nao_quebra(self):
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        doc = self._abrir_docx(
+            prosemirror_to_docx(
+                self._DOC, logo_cliente_id=999999, logo_parceira_id=None
+            )
+        )
+        self.assertEqual(len(doc.sections[0].header.tables), 0)
+
+    # ── variables / metadados ────────────────────────────────────
+
+    def test_build_variables_context_congela_asset_ids(self):
+        from apps.gerelat.document_engine.variables import build_variables_context
+
+        logo = self._asset()
+        self.cli.logomarca = logo
+        self.cli.save()
+        logo_proj = self._asset()
+        self.proj.logomarca = logo_proj
+        self.proj.save()
+
+        ctx = build_variables_context(projeto_id=self.proj.id)
+        self.cli.refresh_from_db()
+        self.proj.refresh_from_db()
+        self.assertEqual(
+            ctx["sistema.cabecalho.logo_cliente_asset_id"], self.cli.logomarca_id
+        )
+        self.assertEqual(
+            ctx["sistema.cabecalho.logo_parceira_asset_id"], self.proj.logomarca_id
+        )
+
+    def test_context_sem_projeto_parceira_none(self):
+        from apps.gerelat.document_engine.variables import build_variables_context
+
+        ctx = build_variables_context(cliente_id=self.cli.id)
+        self.assertIsNone(ctx["sistema.cabecalho.logo_parceira_asset_id"])
+
+    def test_geracao_grava_asset_ids_em_metadados(self):
+        from apps.gerelat.tasks import _do_generate_relatorio
+
+        logo = self._asset()
+        self.cli.logomarca = logo
+        self.cli.save()
+
+        template = Template.objects.create(
+            programa=self.prog,
+            nivel=NivelTemplate.PROGRAMA,
+            nome="T",
+            modelo_json=self._DOC,
+        )
+        resultado = _do_generate_relatorio(
+            programa_id=self.prog.id, template_id=template.id
+        )
+        rel = Relatorio.objects.get(id=resultado["id"])
+        self.cli.refresh_from_db()
+        self.assertEqual(
+            rel.metadados["sistema.cabecalho.logo_cliente_asset_id"],
+            self.cli.logomarca_id,
+        )

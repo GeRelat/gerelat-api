@@ -97,6 +97,17 @@ def build_variables_context(
         cliente=cliente, programa=programa, projeto=projeto, evento=evento
     )
 
+    # Logomarcas do cabeçalho do relatório, congeladas aqui para sobreviverem em
+    # Relatorio.metadados (o snapshot que o download consome — Relatorio não tem
+    # FK de escopo). Prefixo reservado 'sistema.' evita colisão com
+    # CampoDefinicao.referencia (ver models.CampoDefinicao.clean).
+    context["sistema.cabecalho.logo_cliente_asset_id"] = (
+        cliente.logomarca_id if cliente else None
+    )
+    context["sistema.cabecalho.logo_parceira_asset_id"] = (
+        projeto.logomarca_id if projeto else None
+    )
+
     conditions = []
     if cliente:
         conditions.append(Q(cliente_id=cliente.id))
