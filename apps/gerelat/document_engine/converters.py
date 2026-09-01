@@ -167,18 +167,44 @@ def _normalize_marks(node: dict) -> dict:
     return node
 
 
-def _inline_nodes_from_valor(ref: str, valor: Any) -> list[dict]:
-    """Return inline ProseMirror nodes for a text/richtext campo valor."""
+# Profundidade máxima de aninhamento de variáveis richtext (uma variável richtext
+# resolvida cujo valor referencia outra variável richtext, e assim por diante).
+# `validate_richtext` já proíbe richtext-dentro-de-richtext, mas documentos
+# legados podem ter o nó — a guarda evita `RecursionError` em produção.
+MAX_PROFUNDIDADE_RICHTEXT = 5
+
+
+def _paragrafo_texto(texto: str) -> dict:
+    return {"type": "paragraph", "content": [{"type": "text", "text": texto}]}
+
+
+def _inline_nodes_from_valor(
+    ref: str,
+    valor: Any,
+    variables: dict,
+    pilha: frozenset,
+    profundidade: int,
+) -> list[dict]:
+    """Return inline ProseMirror nodes for a text/richtext campo valor.
+
+    Um valor richtext pode conter outras variáveis (var_text/var_image/...) —
+    depois de achatar seus blocos em nós inline, resolve-as recursivamente."""
     if not valor:
         return [{"type": "text", "text": f"[{ref}]"}]
 
     if isinstance(valor, dict) and valor.get("type") == "doc":
         inline: list[dict] = []
         for block in valor.get("content", []):
-            inline.extend(
-                _normalize_marks(child) for child in (block.get("content") or [])
-            )
-        return inline or [{"type": "text", "text": ""}]
+            inline.extend(block.get("content") or [])
+        inline = _traverse_inline(
+            inline,
+            variables,
+            pilha=pilha | {ref},
+            profundidade=profundidade + 1,
+        )
+        return [_normalize_marks(node) for node in inline] or [
+            {"type": "text", "text": ""}
+        ]
 
     return [{"type": "text", "text": str(valor)}]
 
@@ -241,19 +267,38 @@ _TABLE_VAR_TYPES = {"var_table", "table_ref"}
 _RICHTEXT_VAR_TYPES = {"var_richtext"}
 
 
-def _traverse_inline(nodes: list[dict], variables: dict) -> list[dict]:
+def _traverse_inline(
+    nodes: list[dict],
+    variables: dict,
+    *,
+    pilha: frozenset = frozenset(),
+    profundidade: int = 0,
+) -> list[dict]:
     result: list[dict] = []
     for node in nodes:
         if node.get("type") in _INLINE_VAR_TYPES:
             ref = node.get("attrs", {}).get("ref", "")
+            if ref in pilha or profundidade >= MAX_PROFUNDIDADE_RICHTEXT:
+                result.append(
+                    {"type": "text", "text": f'[ciclo de variáveis em "{ref}"]'}
+                )
+                continue
             valor = variables.get(ref)
-            result.extend(_inline_nodes_from_valor(ref, valor))
+            result.extend(
+                _inline_nodes_from_valor(ref, valor, variables, pilha, profundidade)
+            )
         else:
             result.append(node)
     return result
 
 
-def _traverse_blocks(nodes: list[dict], variables: dict) -> list[dict]:
+def _traverse_blocks(
+    nodes: list[dict],
+    variables: dict,
+    *,
+    pilha: frozenset = frozenset(),
+    profundidade: int = 0,
+) -> list[dict]:
     result: list[dict] = []
     for node in nodes:
         node_type = node.get("type")
@@ -268,11 +313,22 @@ def _traverse_blocks(nodes: list[dict], variables: dict) -> list[dict]:
             result.extend(_block_nodes_for_table_ref(ref, attrs, variables.get(ref)))
 
         elif node_type in _RICHTEXT_VAR_TYPES:
-            # var_richtext: substitui pelo conteúdo richtext da variável
+            # var_richtext: substitui pelo conteúdo richtext da variável, com as
+            # variáveis aninhadas nesse conteúdo também resolvidas.
             ref = attrs.get("ref", "")
             valor = variables.get(ref)
-            if isinstance(valor, dict) and valor.get("type") == "doc":
-                result.extend([_normalize_marks(b) for b in valor.get("content", [])])
+            if ref in pilha or profundidade >= MAX_PROFUNDIDADE_RICHTEXT:
+                result.append(
+                    _paragrafo_texto(f'[ciclo de variáveis em "{ref}"]')
+                )
+            elif isinstance(valor, dict) and valor.get("type") == "doc":
+                filhos = _traverse_blocks(
+                    valor.get("content", []),
+                    variables,
+                    pilha=pilha | {ref},
+                    profundidade=profundidade + 1,
+                )
+                result.extend(_normalize_marks(b) for b in filhos)
             else:
                 # Mantém como placeholder se a variável não tiver valor
                 result.append(node)
@@ -280,25 +336,46 @@ def _traverse_blocks(nodes: list[dict], variables: dict) -> list[dict]:
         elif node_type == "custom_text":
             label = attrs.get("label", "")
             valor = variables.get(label)
-            if isinstance(valor, dict) and valor.get("type") == "doc":
+            if (
+                label not in pilha
+                and profundidade < MAX_PROFUNDIDADE_RICHTEXT
+                and isinstance(valor, dict)
+                and valor.get("type") == "doc"
+            ):
                 # Backward compat: custom_text cujo label corresponde a uma variável richtext
-                result.extend([_normalize_marks(b) for b in valor.get("content", [])])
+                filhos = _traverse_blocks(
+                    valor.get("content", []),
+                    variables,
+                    pilha=pilha | {label},
+                    profundidade=profundidade + 1,
+                )
+                result.extend(_normalize_marks(b) for b in filhos)
             else:
                 # Bloco editável livre — mantém como custom_text para edição no relatório
                 new_node = copy.copy(node)
                 new_node["content"] = _traverse_blocks(
-                    node.get("content", []), variables
+                    node.get("content", []),
+                    variables,
+                    pilha=pilha,
+                    profundidade=profundidade,
                 )
                 result.append(new_node)
 
         elif node_type == "paragraph":
             new_node = copy.copy(node)
-            new_node["content"] = _traverse_inline(node.get("content", []), variables)
+            new_node["content"] = _traverse_inline(
+                node.get("content", []),
+                variables,
+                pilha=pilha,
+                profundidade=profundidade,
+            )
             result.append(new_node)
 
         elif "content" in node:
             new_node = copy.copy(node)
-            new_node["content"] = _traverse_blocks(node["content"], variables)
+            new_node["content"] = _traverse_blocks(
+                node["content"], variables, pilha=pilha, profundidade=profundidade
+            )
             result.append(new_node)
 
         else:
@@ -307,27 +384,38 @@ def _traverse_blocks(nodes: list[dict], variables: dict) -> list[dict]:
     return result
 
 
-def extract_gap_refs(template_json: dict) -> set[str]:
+def extract_gap_refs(
+    template_json: dict, docs_por_ref: dict[str, dict] | None = None
+) -> set[str]:
     """Walk a ProseMirror template JSON and collect every ref/label referenced
     by a gap node (var_text/variable/var_richtext/var_image/image_ref/
-    var_table/table_ref/custom_text)."""
+    var_table/table_ref/custom_text).
+
+    Quando `docs_por_ref` é fornecido (mapa referencia -> documento ProseMirror
+    do valor de uma variável richtext), a varredura desce também para dentro
+    desses valores, expondo as variáveis usadas transitivamente por eles."""
     refs: set[str] = set()
     gap_ref_types = (
         _INLINE_VAR_TYPES | _IMAGE_VAR_TYPES | _TABLE_VAR_TYPES | _RICHTEXT_VAR_TYPES
     )
+    visitados: set[str] = set()
 
     def _walk(nodes: list[dict]) -> None:
         for node in nodes:
             node_type = node.get("type")
             attrs = node.get("attrs") or {}
+            ref = None
             if node_type in gap_ref_types:
                 ref = attrs.get("ref")
-                if ref:
-                    refs.add(ref)
             elif node_type == "custom_text":
-                label = attrs.get("label")
-                if label:
-                    refs.add(label)
+                ref = attrs.get("label")
+            if ref:
+                refs.add(ref)
+                if docs_por_ref and ref not in visitados:
+                    visitados.add(ref)
+                    doc = docs_por_ref.get(ref)
+                    if isinstance(doc, dict):
+                        _walk(doc.get("content", []))
             if "content" in node:
                 _walk(node["content"])
 

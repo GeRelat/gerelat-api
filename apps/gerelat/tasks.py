@@ -4,6 +4,7 @@ from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
 
+from .document_engine.converters import replace_placeholders
 from .document_engine.variables import build_variables_context
 from .models import AgendamentoRelatorio, Relatorio, Template
 from .services.agendamento_relatorio import sincronizar_periodic_task
@@ -24,15 +25,19 @@ def _do_generate_relatorio(
 ) -> dict:
     template = Template.objects.get(id=template_id)
 
-    if documento_json is None:
-        documento_json = template.modelo_json
-
     context = build_variables_context(
         cliente_id=cliente_id,
         programa_id=programa_id,
         projeto_id=projeto_id,
         evento_id=evento_id,
     )
+
+    # Sem documento_json explícito (ex.: relatório agendado), resolve as
+    # variáveis do template agora. Guardar o template cru aqui faria o download
+    # (que prioriza relatorio.documento_json) baixar o template sem substituir
+    # nenhuma variável.
+    if documento_json is None and template.modelo_json:
+        documento_json = replace_placeholders(template.modelo_json, context)
 
     relatorio = Relatorio.objects.create(
         evento_id=evento_id,

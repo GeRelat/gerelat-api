@@ -72,6 +72,38 @@ def validate_text(value: Any) -> None:
             _require_str(node.get("text"), "text")
 
 
+# Nós de variável richtext (e o alias legado) — proibidos DENTRO do valor de um
+# texto rico: um texto rico não pode conter outro texto rico.
+_RICHTEXT_NODE_TYPES = {"var_richtext"}
+# Tipos de nó de variável que carregam uma referência e podem aparecer no valor.
+_VAR_NODE_TYPES = {"var_text", "variable", "var_image", "image_ref", "var_table", "table_ref"}
+
+
+def _check_richtext_restrictions(node: Any) -> None:
+    """Além da estrutura (validada por `_validate_prosemirror_node`), o valor de
+    um texto rico não pode conter outra variável richtext nem blocos manuais, e
+    todo nó de variável precisa de uma `ref`."""
+    if not isinstance(node, dict):
+        return
+
+    node_type = node.get("type")
+    if node_type in _RICHTEXT_NODE_TYPES:
+        _raise_schema_error(
+            "Um texto rico não pode conter outra variável de texto rico."
+        )
+    if node_type == "custom_text":
+        _raise_schema_error(
+            "Blocos manuais só existem em templates, não no valor de uma variável."
+        )
+    if node_type in _VAR_NODE_TYPES:
+        ref = (node.get("attrs") or {}).get("ref", "")
+        if not isinstance(ref, str) or not ref.strip():
+            _raise_schema_error("Variável sem referência no texto rico.")
+
+    for child in node.get("content", []) or []:
+        _check_richtext_restrictions(child)
+
+
 def validate_richtext(value: Any) -> None:
     data = _require_dict(value, "Texto rico")
     if data.get("type") != "doc":
@@ -80,6 +112,7 @@ def validate_richtext(value: Any) -> None:
     content = _require_list(data.get("content"), "content")
     for node in content:
         _validate_prosemirror_node(node)
+        _check_richtext_restrictions(node)
 
 
 def validate_table(value: Any) -> None:

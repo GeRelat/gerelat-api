@@ -1464,3 +1464,176 @@ class AgendamentoRelatorioAPITest(TestCase):
             AgendamentoRelatorio.objects.filter(id=agendamento_id).exists()
         )
         self.assertFalse(PeriodicTask.objects.filter(id=pt_id).exists())
+
+
+class TextoRicoAninhadoTest(TestCase):
+    """Resolução recursiva de variáveis dentro do valor de um texto rico
+    (document_engine.converters) + propagação de escopo (document_engine.scope)
+    + guardas de validação (document_engine.validators)."""
+
+    def _doc(self, *blocos):
+        return {"type": "doc", "content": list(blocos)}
+
+    def _par(self, *inline):
+        return {"type": "paragraph", "content": list(inline)}
+
+    def _txt(self, texto):
+        return {"type": "text", "text": texto}
+
+    def _var_text(self, ref):
+        return {"type": "var_text", "attrs": {"ref": ref}}
+
+    # ── converters.replace_placeholders ────────────────────────────
+
+    def test_var_text_dentro_de_valor_richtext_resolve(self):
+        from apps.gerelat.document_engine.converters import replace_placeholders
+
+        template = self._doc({"type": "var_richtext", "attrs": {"ref": "texto_padrao"}})
+        variables = {
+            "texto_padrao": self._doc(
+                self._par(
+                    self._txt("Parceira: "),
+                    self._var_text("nome_parceira"),
+                    self._txt("."),
+                )
+            ),
+            "nome_parceira": "FURG",
+        }
+
+        resultado = replace_placeholders(template, variables)
+        inline = resultado["content"][0]["content"]
+        self.assertEqual(
+            [n.get("text") for n in inline if n.get("type") == "text"],
+            ["Parceira: ", "FURG", "."],
+        )
+        self.assertFalse(any(n.get("type") == "var_text" for n in inline))
+
+    def test_sistema_dentro_de_valor_richtext_resolve(self):
+        from apps.gerelat.document_engine.converters import replace_placeholders
+
+        template = self._doc({"type": "var_richtext", "attrs": {"ref": "texto_padrao"}})
+        variables = {
+            "texto_padrao": self._doc(
+                self._par(
+                    self._txt("Evento "),
+                    self._var_text("sistema.evento.nome"),
+                    self._txt("."),
+                )
+            ),
+            "sistema.evento.nome": "Oficina",
+        }
+
+        resultado = replace_placeholders(template, variables)
+        textos = [
+            n["text"]
+            for n in resultado["content"][0]["content"]
+            if n.get("type") == "text"
+        ]
+        self.assertEqual(textos, ["Evento ", "Oficina", "."])
+
+    def test_ciclo_richtext_nao_estoura_pilha(self):
+        from apps.gerelat.document_engine.converters import replace_placeholders
+
+        template = self._doc({"type": "var_richtext", "attrs": {"ref": "a"}})
+        variables = {
+            "a": self._doc({"type": "var_richtext", "attrs": {"ref": "b"}}),
+            "b": self._doc({"type": "var_richtext", "attrs": {"ref": "a"}}),
+        }
+
+        resultado = replace_placeholders(template, variables)
+        texto_plano = str(resultado)
+        self.assertIn("ciclo de variáveis", texto_plano)
+
+    def test_var_richtext_sem_valor_mantem_placeholder(self):
+        from apps.gerelat.document_engine.converters import replace_placeholders
+
+        template = self._doc({"type": "var_richtext", "attrs": {"ref": "x"}})
+        resultado = replace_placeholders(template, {})
+        self.assertEqual(resultado["content"][0]["type"], "var_richtext")
+
+    # ── validators.validate_richtext ──────────────────────────────
+
+    def test_validate_richtext_rejeita_richtext_aninhado(self):
+        from django.core.exceptions import ValidationError
+
+        from apps.gerelat.document_engine.validators import validate_richtext
+
+        with self.assertRaises(ValidationError):
+            validate_richtext(
+                self._doc({"type": "var_richtext", "attrs": {"ref": "outro"}})
+            )
+
+    def test_validate_richtext_rejeita_custom_text(self):
+        from django.core.exceptions import ValidationError
+
+        from apps.gerelat.document_engine.validators import validate_richtext
+
+        with self.assertRaises(ValidationError):
+            validate_richtext(
+                self._doc(
+                    {
+                        "type": "custom_text",
+                        "attrs": {"label": "bloco"},
+                        "content": [self._par(self._txt("x"))],
+                    }
+                )
+            )
+
+    def test_validate_richtext_rejeita_var_sem_ref(self):
+        from django.core.exceptions import ValidationError
+
+        from apps.gerelat.document_engine.validators import validate_richtext
+
+        with self.assertRaises(ValidationError):
+            validate_richtext(
+                self._doc(self._par({"type": "var_text", "attrs": {"ref": ""}}))
+            )
+
+    def test_validate_richtext_aceita_var_text_com_ref(self):
+        from apps.gerelat.document_engine.validators import validate_richtext
+
+        validate_richtext(
+            self._doc(self._par(self._txt("oi "), self._var_text("nome_parceira")))
+        )
+
+    # ── scope.scan_required_nivel (propagação transitiva) ─────────
+
+    def test_scan_required_nivel_propaga_por_valor_richtext(self):
+        from apps.gerelat.document_engine.scope import scan_required_nivel
+
+        cli = Cliente.objects.create(
+            nome="Brisa",
+            cnpj="11111111111111",
+            nome_contato="C1",
+            email_contato="c1@c.com",
+            fone_contato="1111",
+            numero_contrato="101",
+            data_termino_contrato="2030-01-01",
+        )
+        prog = Programa.objects.create(nome="TIC55", cliente=cli)
+
+        definicao = CampoDefinicao.objects.create(
+            programa=prog,
+            nivel_aplicacao=NivelAplicacao.PROGRAMA,
+            referencia="texto_padrao",
+            descricao="d",
+            tipo=CampoTipo.RICHTEXT,
+        )
+        CampoValor.objects.create(
+            definicao=definicao,
+            programa=prog,
+            valor=self._doc(
+                self._par(
+                    self._txt("Evento "),
+                    self._var_text("sistema.evento.nome"),
+                )
+            ),
+        )
+
+        template_json = self._doc(
+            {"type": "var_richtext", "attrs": {"ref": "texto_padrao"}}
+        )
+
+        # Sem a expansão transitiva, o template só cita "texto_padrao" (programa).
+        nivel = scan_required_nivel(template_json, cliente=cli, programa=prog)
+        self.assertEqual(nivel, "evento")

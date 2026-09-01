@@ -120,6 +120,22 @@ def _render_custom_text(doc: Any, node: dict) -> None:
         _render_block(doc, child)
 
 
+# Nós de variável (bloco) que chegam aqui só quando não foram resolvidos —
+# variável sem valor. Renderiza o placeholder [ref] em vez de sumir com ele.
+_UNRESOLVED_BLOCK_VAR_TYPES = {
+    "var_richtext",
+    "var_image",
+    "image_ref",
+    "var_table",
+    "table_ref",
+}
+
+
+def _render_unresolved_var(doc: Any, node: dict) -> None:
+    ref = node.get("attrs", {}).get("ref", "")
+    doc.add_paragraph(f"[{ref}]" if ref else "[variável não resolvida]")
+
+
 def _render_block(doc: Any, node: dict) -> None:
     node_type = node.get("type")
     if node_type == "paragraph":
@@ -136,6 +152,8 @@ def _render_block(doc: Any, node: dict) -> None:
         _render_image_block(doc, node)
     elif node_type == "custom_text":
         _render_custom_text(doc, node)
+    elif node_type in _UNRESOLVED_BLOCK_VAR_TYPES:
+        _render_unresolved_var(doc, node)
     # Outros tipos são silenciosamente ignorados
 
 
