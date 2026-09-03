@@ -13,7 +13,7 @@ from .utils.uploads import asset_upload_to
 
 class Cliente(models.Model):
     id = models.AutoField(primary_key=True)
-    nome = models.CharField(max_length=150)
+    nome = models.CharField(max_length=150, db_index=True)
     cnpj = models.CharField(max_length=20)
     nome_contato = models.CharField(max_length=150)
     email_contato = models.EmailField(max_length=150)

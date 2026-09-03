@@ -25,7 +25,9 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import permissions as perms
+from . import (
+    permissions as perms,
+)
 from .constants import DOCX_ALLOWED_MIME
 from .document_engine.converters import (
     convert_docx_to_prosemirror,
@@ -98,11 +100,12 @@ from .services.agendamento_relatorio import (
     remover_periodic_task,
     sincronizar_periodic_task,
 )
+from .services.assinaturas_relatorio import resolver_assinaturas
 from .services.autorizacao import (
     get_nivel_acesso,
     get_nivel_acesso_programa,
+    invalidar_cache as invalidar_cache_autorizacao,
 )
-from .services.assinaturas_relatorio import resolver_assinaturas
 from .services.eventos_relatorio import eventos_disponiveis_para_relatorio
 from .services.gestao_acesso import (
     ConflitoDeAcessoError,
@@ -157,41 +160,37 @@ class AssetViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return Asset.objects.none()
         if perms.is_platform_admin(user):
-            return Asset.objects.all()
+            return (
+                Asset.objects.all()
+                .select_related("cliente", "programa", "projeto")
+                .prefetch_related(
+                    "usos",
+                    "usos__cliente",
+                    "usos__programa",
+                    "usos__projeto",
+                    "usos__campo_valor__definicao",
+                )
+            )
 
-        clientes_admin_ids = Cliente.objects.filter(membros__user=user).values_list(
-            "id", flat=True
+        return (
+            Asset.objects.filter(
+                Q(cliente__membros__user=user)
+                | Q(programa__membros__user=user)
+                | Q(projeto__membros__user=user)
+                | Q(cliente__programas__membros__user=user)
+                | Q(cliente__programas__projetos__membros__user=user)
+                | Q(programa__projetos__membros__user=user)
+            )
+            .distinct()
+            .select_related("cliente", "programa", "projeto")
+            .prefetch_related(
+                "usos",
+                "usos__cliente",
+                "usos__programa",
+                "usos__projeto",
+                "usos__campo_valor__definicao",
+            )
         )
-        programas_membro_ids = MembroPrograma.objects.filter(user=user).values_list(
-            "programa_id", flat=True
-        )
-        projetos_membro_ids = MembroProjeto.objects.filter(user=user).values_list(
-            "projeto_id", flat=True
-        )
-
-        clientes_acessiveis = Cliente.objects.filter(
-            Q(id__in=clientes_admin_ids)
-            | Q(programas__id__in=programas_membro_ids)
-            | Q(programas__projetos__id__in=projetos_membro_ids)
-        ).values_list("id", flat=True)
-
-        programas_acessiveis = Programa.objects.filter(
-            Q(cliente_id__in=clientes_admin_ids)
-            | Q(id__in=programas_membro_ids)
-            | Q(projetos__id__in=projetos_membro_ids)
-        ).values_list("id", flat=True)
-
-        projetos_acessiveis = Projeto.objects.filter(
-            Q(programa__cliente_id__in=clientes_admin_ids)
-            | Q(programa_id__in=programas_membro_ids)
-            | Q(id__in=projetos_membro_ids)
-        ).values_list("id", flat=True)
-
-        return Asset.objects.filter(
-            Q(cliente_id__in=clientes_acessiveis)
-            | Q(programa_id__in=programas_acessiveis)
-            | Q(projeto_id__in=projetos_acessiveis)
-        ).distinct()
 
     @action(detail=False, methods=["post"], url_path="presigned-url")
     def presigned_url(self, request):
@@ -284,17 +283,21 @@ class ProgramaViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return Programa.objects.none()
         if perms.is_platform_admin(user):
-            return Programa.objects.all()
+            return Programa.objects.all().select_related("cliente", "logomarca")
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values(
             "projeto__programa"
         )
-        return Programa.objects.filter(
-            Q(cliente__in=clientes_admin)
-            | Q(id__in=programas_membro)
-            | Q(id__in=projetos_membro)
-        ).distinct()
+        return (
+            Programa.objects.filter(
+                Q(cliente__in=clientes_admin)
+                | Q(id__in=programas_membro)
+                | Q(id__in=projetos_membro)
+            )
+            .distinct()
+            .select_related("cliente", "logomarca")
+        )
 
 
 class EquipeProgramaViewSet(viewsets.ModelViewSet):
@@ -307,17 +310,23 @@ class EquipeProgramaViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return EquipePrograma.objects.none()
         if perms.is_platform_admin(user):
-            return EquipePrograma.objects.all()
+            return EquipePrograma.objects.all().select_related(
+                "programa", "programa__cliente"
+            )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values(
             "projeto__programa"
         )
-        return EquipePrograma.objects.filter(
-            Q(programa__cliente__in=clientes_admin)
-            | Q(programa__in=programas_membro)
-            | Q(programa__in=projetos_membro)
-        ).distinct()
+        return (
+            EquipePrograma.objects.filter(
+                Q(programa__cliente__in=clientes_admin)
+                | Q(programa__in=programas_membro)
+                | Q(programa__in=projetos_membro)
+            )
+            .distinct()
+            .select_related("programa", "programa__cliente")
+        )
 
     def perform_create(self, serializer):
         programa = serializer.validated_data.get("programa")
@@ -340,15 +349,21 @@ class ProjetoViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return Projeto.objects.none()
         if perms.is_platform_admin(user):
-            return Projeto.objects.all()
+            return Projeto.objects.all().select_related(
+                "programa", "programa__cliente", "logomarca"
+            )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
-        return Projeto.objects.filter(
-            Q(programa__cliente__in=clientes_admin)
-            | Q(programa__in=programas_membro)
-            | Q(id__in=projetos_membro)
-        ).distinct()
+        return (
+            Projeto.objects.filter(
+                Q(programa__cliente__in=clientes_admin)
+                | Q(programa__in=programas_membro)
+                | Q(id__in=projetos_membro)
+            )
+            .distinct()
+            .select_related("programa", "programa__cliente", "logomarca")
+        )
 
     def perform_create(self, serializer):
         programa = serializer.validated_data.get("programa")
@@ -371,7 +386,9 @@ class CampoDefinicaoViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return CampoDefinicao.objects.none()
         if perms.is_platform_admin(user):
-            return CampoDefinicao.objects.all()
+            return CampoDefinicao.objects.all().select_related(
+                "cliente", "programa", "projeto"
+            )
 
         clientes_acesso = Cliente.objects.filter(
             Q(membros__user=user)
@@ -391,11 +408,15 @@ class CampoDefinicaoViewSet(viewsets.ModelViewSet):
             | Q(membros__user=user)
         ).distinct()
 
-        return CampoDefinicao.objects.filter(
-            Q(cliente__in=clientes_acesso)
-            | Q(programa__in=programas_acesso)
-            | Q(projeto__in=projetos_acesso)
-        ).distinct()
+        return (
+            CampoDefinicao.objects.filter(
+                Q(cliente__in=clientes_acesso)
+                | Q(programa__in=programas_acesso)
+                | Q(projeto__in=projetos_acesso)
+            )
+            .distinct()
+            .select_related("cliente", "programa", "projeto")
+        )
 
 
 class CampoValorViewSet(viewsets.ModelViewSet):
@@ -408,7 +429,9 @@ class CampoValorViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return CampoValor.objects.none()
         if perms.is_platform_admin(user):
-            return CampoValor.objects.all()
+            return CampoValor.objects.all().select_related(
+                "definicao", "cliente", "programa", "projeto", "evento"
+            )
 
         clientes_acesso = Cliente.objects.filter(
             Q(membros__user=user)
@@ -428,11 +451,15 @@ class CampoValorViewSet(viewsets.ModelViewSet):
             | Q(membros__user=user)
         ).distinct()
 
-        return CampoValor.objects.filter(
-            Q(cliente__in=clientes_acesso)
-            | Q(programa__in=programas_acesso)
-            | Q(projeto__in=projetos_acesso)
-        ).distinct()
+        return (
+            CampoValor.objects.filter(
+                Q(cliente__in=clientes_acesso)
+                | Q(programa__in=programas_acesso)
+                | Q(projeto__in=projetos_acesso)
+            )
+            .distinct()
+            .select_related("definicao", "cliente", "programa", "projeto", "evento")
+        )
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -478,15 +505,23 @@ class EquipeProjetoViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return EquipeProjeto.objects.none()
         if perms.is_platform_admin(user):
-            return EquipeProjeto.objects.all()
+            return EquipeProjeto.objects.all().select_related(
+                "projeto", "projeto__programa", "projeto__programa__cliente"
+            )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
-        return EquipeProjeto.objects.filter(
-            Q(projeto__programa__cliente__in=clientes_admin)
-            | Q(projeto__programa__in=programas_membro)
-            | Q(projeto__in=projetos_membro)
-        ).distinct()
+        return (
+            EquipeProjeto.objects.filter(
+                Q(projeto__programa__cliente__in=clientes_admin)
+                | Q(projeto__programa__in=programas_membro)
+                | Q(projeto__in=projetos_membro)
+            )
+            .distinct()
+            .select_related(
+                "projeto", "projeto__programa", "projeto__programa__cliente"
+            )
+        )
 
     def perform_create(self, serializer):
         projeto = serializer.validated_data.get("projeto")
@@ -509,18 +544,24 @@ class ClasseEventoViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return ClasseEvento.objects.none()
         if perms.is_platform_admin(user):
-            return ClasseEvento.objects.all()
+            return ClasseEvento.objects.all().select_related(
+                "cliente", "programa", "projeto"
+            )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
-        return ClasseEvento.objects.filter(
-            Q(cliente__in=clientes_admin)
-            | Q(programa__in=programas_membro)
-            | Q(programa__cliente__in=clientes_admin)
-            | Q(projeto__in=projetos_membro)
-            | Q(projeto__programa__in=programas_membro)
-            | Q(projeto__programa__cliente__in=clientes_admin)
-        ).distinct()
+        return (
+            ClasseEvento.objects.filter(
+                Q(cliente__in=clientes_admin)
+                | Q(programa__in=programas_membro)
+                | Q(programa__cliente__in=clientes_admin)
+                | Q(projeto__in=projetos_membro)
+                | Q(projeto__programa__in=programas_membro)
+                | Q(projeto__programa__cliente__in=clientes_admin)
+            )
+            .distinct()
+            .select_related("cliente", "programa", "projeto")
+        )
 
 
 class EventoViewSet(viewsets.ModelViewSet):
@@ -533,18 +574,24 @@ class EventoViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return Evento.objects.none()
         if perms.is_platform_admin(user):
-            return Evento.objects.all()
+            return Evento.objects.all().select_related(
+                "classe_evento", "cliente", "programa", "projeto"
+            )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
-        return Evento.objects.filter(
-            Q(cliente__in=clientes_admin)
-            | Q(programa__in=programas_membro)
-            | Q(programa__cliente__in=clientes_admin)
-            | Q(projeto__in=projetos_membro)
-            | Q(projeto__programa__in=programas_membro)
-            | Q(projeto__programa__cliente__in=clientes_admin)
-        ).distinct()
+        return (
+            Evento.objects.filter(
+                Q(cliente__in=clientes_admin)
+                | Q(programa__in=programas_membro)
+                | Q(programa__cliente__in=clientes_admin)
+                | Q(projeto__in=projetos_membro)
+                | Q(projeto__programa__in=programas_membro)
+                | Q(projeto__programa__cliente__in=clientes_admin)
+            )
+            .distinct()
+            .select_related("classe_evento", "cliente", "programa", "projeto")
+        )
 
 
 class TemplateViewSet(viewsets.ModelViewSet):
@@ -558,18 +605,24 @@ class TemplateViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return Template.objects.none()
         if perms.is_platform_admin(user):
-            return Template.objects.all()
+            return Template.objects.all().select_related(
+                "cliente", "programa", "projeto"
+            )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
-        return Template.objects.filter(
-            Q(cliente__in=clientes_admin)
-            | Q(programa__in=programas_membro)
-            | Q(programa__cliente__in=clientes_admin)
-            | Q(projeto__in=projetos_membro)
-            | Q(projeto__programa__in=programas_membro)
-            | Q(projeto__programa__cliente__in=clientes_admin)
-        ).distinct()
+        return (
+            Template.objects.filter(
+                Q(cliente__in=clientes_admin)
+                | Q(programa__in=programas_membro)
+                | Q(programa__cliente__in=clientes_admin)
+                | Q(projeto__in=projetos_membro)
+                | Q(projeto__programa__in=programas_membro)
+                | Q(projeto__programa__cliente__in=clientes_admin)
+            )
+            .distinct()
+            .select_related("cliente", "programa", "projeto")
+        )
 
     @action(detail=True, methods=["get"], url_path="download")
     def download(self, request, pk=None):
@@ -584,11 +637,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
         cliente = (
             template.cliente
             or (template.programa.cliente if template.programa_id else None)
-            or (
-                template.projeto.programa.cliente
-                if template.projeto_id
-                else None
-            )
+            or (template.projeto.programa.cliente if template.projeto_id else None)
         )
         extras = {
             "logo_cliente_id": cliente.logomarca_id if cliente else None,
@@ -828,17 +877,23 @@ class AssinaturaTemplateViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return AssinaturaTemplate.objects.none()
         if perms.is_platform_admin(user):
-            return AssinaturaTemplate.objects.all()
+            return AssinaturaTemplate.objects.all().select_related(
+                "template", "equipe_programa", "equipe_projeto"
+            )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
-        return AssinaturaTemplate.objects.filter(
-            Q(equipe_programa__programa__cliente__in=clientes_admin)
-            | Q(equipe_programa__programa__in=programas_membro)
-            | Q(equipe_projeto__projeto__programa__cliente__in=clientes_admin)
-            | Q(equipe_projeto__projeto__programa__in=programas_membro)
-            | Q(equipe_projeto__projeto__in=projetos_membro)
-        ).distinct()
+        return (
+            AssinaturaTemplate.objects.filter(
+                Q(equipe_programa__programa__cliente__in=clientes_admin)
+                | Q(equipe_programa__programa__in=programas_membro)
+                | Q(equipe_projeto__projeto__programa__cliente__in=clientes_admin)
+                | Q(equipe_projeto__projeto__programa__in=programas_membro)
+                | Q(equipe_projeto__projeto__in=projetos_membro)
+            )
+            .distinct()
+            .select_related("template", "equipe_programa", "equipe_projeto")
+        )
 
     @extend_schema(
         request=AssinaturaTemplateSerializer,
@@ -888,12 +943,16 @@ class ClienteViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return Cliente.objects.none()
         if perms.is_platform_admin(user):
-            return Cliente.objects.all()
-        return Cliente.objects.filter(
-            Q(membros__user=user)
-            | Q(programas__membros__user=user)
-            | Q(programas__projetos__membros__user=user)
-        ).distinct()
+            return Cliente.objects.all().select_related("logomarca")
+        return (
+            Cliente.objects.filter(
+                Q(membros__user=user)
+                | Q(programas__membros__user=user)
+                | Q(programas__projetos__membros__user=user)
+            )
+            .distinct()
+            .select_related("logomarca")
+        )
 
     @action(
         detail=False,
@@ -1025,6 +1084,9 @@ class ClienteViewSet(viewsets.ModelViewSet):
         sincronizar_acessos_cliente(
             cliente, alvo_user, e_admin_cliente, programas_ids, projetos_ids, req_user
         )
+        # Invalida o cache de autorização do usuário cujos papéis foram alterados,
+        # para que qualquer checagem subsequente neste request reflita o novo estado.
+        invalidar_cache_autorizacao(alvo_user)
 
         return Response({"detail": "Permissões atualizadas com sucesso."})
 
@@ -1039,18 +1101,24 @@ class TemplateClasseEventoViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return TemplateClasseEvento.objects.none()
         if perms.is_platform_admin(user):
-            return TemplateClasseEvento.objects.all()
+            return TemplateClasseEvento.objects.all().select_related(
+                "template", "classe_evento"
+            )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
-        return TemplateClasseEvento.objects.filter(
-            Q(template__cliente__in=clientes_admin)
-            | Q(template__programa__in=programas_membro)
-            | Q(template__programa__cliente__in=clientes_admin)
-            | Q(template__projeto__in=projetos_membro)
-            | Q(template__projeto__programa__in=programas_membro)
-            | Q(template__projeto__programa__cliente__in=clientes_admin)
-        ).distinct()
+        return (
+            TemplateClasseEvento.objects.filter(
+                Q(template__cliente__in=clientes_admin)
+                | Q(template__programa__in=programas_membro)
+                | Q(template__programa__cliente__in=clientes_admin)
+                | Q(template__projeto__in=projetos_membro)
+                | Q(template__projeto__programa__in=programas_membro)
+                | Q(template__projeto__programa__cliente__in=clientes_admin)
+            )
+            .distinct()
+            .select_related("template", "classe_evento")
+        )
 
 
 class RelatorioViewSet(viewsets.ModelViewSet):
@@ -1063,18 +1131,22 @@ class RelatorioViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return Relatorio.objects.none()
         if perms.is_platform_admin(user):
-            return Relatorio.objects.all()
+            return Relatorio.objects.all().select_related("template", "evento")
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
-        return Relatorio.objects.filter(
-            Q(evento__projeto__programa__cliente__in=clientes_admin)
-            | Q(evento__projeto__programa__in=programas_membro)
-            | Q(evento__projeto__in=projetos_membro)
-            | Q(evento__programa__cliente__in=clientes_admin)
-            | Q(evento__programa__in=programas_membro)
-            | Q(evento__cliente__in=clientes_admin)
-        ).distinct()
+        return (
+            Relatorio.objects.filter(
+                Q(evento__projeto__programa__cliente__in=clientes_admin)
+                | Q(evento__projeto__programa__in=programas_membro)
+                | Q(evento__projeto__in=projetos_membro)
+                | Q(evento__programa__cliente__in=clientes_admin)
+                | Q(evento__programa__in=programas_membro)
+                | Q(evento__cliente__in=clientes_admin)
+            )
+            .distinct()
+            .select_related("template", "evento")
+        )
 
     @extend_schema(
         request=RelatorioGenerateRequestSerializer,
@@ -1339,7 +1411,7 @@ class MembroClienteViewSet(viewsets.ModelViewSet):
         else:
             qs = MembroCliente.objects.filter(
                 cliente__in=Cliente.objects.filter(membros__user=user)
-            )
+            ).select_related("user", "cliente", "promovido_por")
 
         cliente_id = self.request.query_params.get(
             "cliente"
@@ -1388,7 +1460,7 @@ class SolicitacaoClienteViewSet(viewsets.ModelViewSet):
             clientes_admin = Cliente.objects.filter(membros__user=user)
             qs = SolicitacaoCliente.objects.filter(
                 Q(cliente__in=clientes_admin) | Q(user=user)
-            )
+            ).select_related("user", "cliente")
 
         cliente_id = self.request.query_params.get("cliente")
         if cliente_id:
@@ -1526,6 +1598,8 @@ class SolicitacaoClienteViewSet(viewsets.ModelViewSet):
             projetos_ids,
             user,  # promovido_por
         )
+        # Invalida o cache de autorização do usuário cujos papéis foram alterados.
+        invalidar_cache_autorizacao(solicitacao.user)
 
         return Response(self.get_serializer(solicitacao).data)
 
@@ -1613,7 +1687,7 @@ class MembroProgramaViewSet(viewsets.ModelViewSet):
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         return MembroPrograma.objects.filter(
             Q(programa__cliente__in=clientes_admin) | Q(programa__in=programas_membro)
-        )
+        ).select_related("user", "programa", "programa__cliente")
 
 
 class MembroProjetoViewSet(viewsets.ModelViewSet):
@@ -1637,4 +1711,6 @@ class MembroProjetoViewSet(viewsets.ModelViewSet):
             Q(projeto__programa__cliente__in=clientes_admin)
             | Q(projeto__programa__in=programas_membro)
             | Q(projeto__in=projetos_membro)
+        ).select_related(
+            "user", "projeto", "projeto__programa", "projeto__programa__cliente"
         )
