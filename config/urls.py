@@ -19,4 +19,5 @@ if settings.DEBUG:
     urlpatterns += [
         path("schema/", SpectacularAPIView.as_view(), name="schema"),
         path("docs/", SpectacularSwaggerView.as_view(url_name="schema")),
+        path("silk/", include("silk.urls", namespace="silk")),
     ]
