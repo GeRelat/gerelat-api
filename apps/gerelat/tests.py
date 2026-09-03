@@ -11,9 +11,9 @@ from rest_framework.test import APIClient, APIRequestFactory
 from apps.gerelat.enums import CampoTipo, NivelAplicacao, NivelTemplate
 from apps.gerelat.models import (
     AgendamentoRelatorio,
-    AssinaturaTemplate,
     Asset,
     AssetUso,
+    AssinaturaTemplate,
     CampoDefinicao,
     CampoValor,
     ClasseEvento,
@@ -1168,15 +1168,17 @@ class AgendamentoRelatorioTest(TestCase):
         from apps.gerelat.tasks import executar_agendamento_relatorio
 
         tz = timezone.get_current_timezone()
-        agendamento = self._criar_agendamento(
-            nome="Relatorio Mensal 31 Multi",
-            template=self.template,
-            cliente=self.cliente,
-            tipo_agendamento=AgendamentoRelatorio.TIPO_RECORRENTE,
-            recorrencia=AgendamentoRelatorio.RECORRENCIA_MENSAL,
-            dia_mes=31,
-            horario_execucao=time(10, 0),
-        )
+        data_base = datetime(2026, 8, 1, 10, 0, tzinfo=tz)
+        with patch("django.utils.timezone.now", return_value=data_base):
+            agendamento = self._criar_agendamento(
+                nome="Relatorio Mensal 31 Multi",
+                template=self.template,
+                cliente=self.cliente,
+                tipo_agendamento=AgendamentoRelatorio.TIPO_RECORRENTE,
+                recorrencia=AgendamentoRelatorio.RECORRENCIA_MENSAL,
+                dia_mes=31,
+                horario_execucao=time(10, 0),
+            )
 
         # (ano, mes) esperado antes de cada execucao -> (ano, mes, dia) esperado apos a execucao
         expected_sequence = [
@@ -1680,9 +1682,7 @@ class CabecalhoLogosTest(TestCase):
     @staticmethod
     def _imagens_no_cabecalho(doc) -> int:
         header = doc.sections[0].header
-        return sum(
-            1 for r in header.part.rels.values() if "image" in r.reltype
-        )
+        return sum(1 for r in header.part.rels.values() if "image" in r.reltype)
 
     def setUp(self):
         import tempfile
@@ -1735,9 +1735,7 @@ class CabecalhoLogosTest(TestCase):
 
         a1 = self._asset()
         doc = self._abrir_docx(
-            prosemirror_to_docx(
-                self._DOC, logo_cliente_id=a1.id, logo_parceira_id=None
-            )
+            prosemirror_to_docx(self._DOC, logo_cliente_id=a1.id, logo_parceira_id=None)
         )
         self.assertEqual(len(doc.sections[0].header.tables), 1)
         self.assertEqual(self._imagens_no_cabecalho(doc), 1)
@@ -1856,8 +1854,16 @@ class AssinaturasRelatorioTest(TestCase):
             prosemirror_to_docx(
                 self._DOC,
                 assinaturas=[
-                    {"nome": "João da Silva", "cargo": "Coordenador", "nome_equipe": ""},
-                    {"nome": "Maria Souza", "cargo": "Diretora", "nome_equipe": "Comissão"},
+                    {
+                        "nome": "João da Silva",
+                        "cargo": "Coordenador",
+                        "nome_equipe": "",
+                    },
+                    {
+                        "nome": "Maria Souza",
+                        "cargo": "Diretora",
+                        "nome_equipe": "Comissão",
+                    },
                 ],
             )
         )

@@ -3,8 +3,9 @@ from typing import Any
 from django.contrib.auth import get_user_model
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
-from apps.gerelat.models import MembroCliente, MembroGeRelat, Projeto
+from apps.gerelat.models import MembroCliente, Projeto
 from apps.gerelat.services.autorizacao import (
+    _is_platform_admin_cached,
     get_nivel_acesso,
     get_nivel_acesso_cliente,
     get_nivel_acesso_programa,
@@ -18,10 +19,12 @@ def is_authenticated(user: Any) -> bool:
 
 
 def is_platform_admin(user: Any) -> bool:
-    return is_authenticated(user) and (
-        getattr(user, "is_superuser", False)
-        or MembroGeRelat.objects.filter(user=user).exists()
-    )
+    if not is_authenticated(user):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+
+    return _is_platform_admin_cached(user)
 
 
 def is_cliente_admin(user: Any, cliente: Any) -> bool:

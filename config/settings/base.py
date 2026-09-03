@@ -233,8 +233,15 @@ if S3_ENABLED:
     if S3_PUBLIC_BASE_URL:
         MEDIA_URL = f"{S3_PUBLIC_BASE_URL.rstrip('/')}/"
 
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+_redis_base = (
+    os.getenv("REDIS_URL")
+    or os.getenv("CELERY_BROKER_URL", "").rsplit("/", 1)[0]
+    or "redis://127.0.0.1:6379"
+).rstrip("/")
+
+REDIS_URL = _redis_base
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL") or f"{_redis_base}/0"
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND") or f"{_redis_base}/0"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
@@ -243,3 +250,29 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": f"{_redis_base}/1",
+        "TIMEOUT": 300,
+    }
+}
+
+_SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+
+if _SENTRY_DSN:
+    import sentry_sdk
+
+    sentry_sdk.init(
+        dsn=_SENTRY_DSN,
+        environment=ENV,
+        release=VERSION,
+        send_default_pii=True,
+        enable_logs=True,
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+        profile_session_sample_rate=float(
+            os.getenv("SENTRY_PROFILE_SESSION_SAMPLE_RATE", "0.1")
+        ),
+        profile_lifecycle="trace",
+    )

@@ -21,6 +21,7 @@ dependencies = [
     "pillow>=12.2.0",
     "psycopg[binary,pool]>=3.3.3",
     "django-silk>=5.5.2",
+    "sentry-sdk[django]>=2.68.1",
 ]
 
 [dependency-groups]
