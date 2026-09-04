@@ -1644,6 +1644,156 @@ class TextoRicoAninhadoTest(TestCase):
         nivel = scan_required_nivel(template_json, cliente=cli, programa=prog)
         self.assertEqual(nivel, "evento")
 
+    def test_scan_required_nivel_propaga_por_campo_customizado_de_projeto(self):
+        """Mesmo cenário relatado em produção: um texto rico de nível PROGRAMA
+        (mesmo valor para todo projeto do programa) cujo conteúdo cita uma
+        CampoDefinicao customizada — não um campo sistema.* — cujo
+        nivel_aplicacao é PROJETO. O nível exigido pelo template tem que
+        refletir essa dependência escondida dentro do texto rico, mesmo que
+        nenhum projeto tenha sido informado ainda."""
+        from apps.gerelat.document_engine.scope import scan_required_nivel
+
+        cli = Cliente.objects.create(
+            nome="Brisa",
+            cnpj="22222222222222",
+            nome_contato="C2",
+            email_contato="c2@c.com",
+            fone_contato="2222",
+            numero_contrato="102",
+            data_termino_contrato="2030-01-01",
+        )
+        prog = Programa.objects.create(nome="TIC56", cliente=cli)
+
+        CampoDefinicao.objects.create(
+            programa=prog,
+            nivel_aplicacao=NivelAplicacao.PROJETO,
+            referencia="nome_escola",
+            descricao="Escola atendida pelo projeto",
+            tipo=CampoTipo.TEXT,
+        )
+        cd_texto = CampoDefinicao.objects.create(
+            programa=prog,
+            nivel_aplicacao=NivelAplicacao.PROGRAMA,
+            referencia="texto_padrao",
+            descricao="Parágrafo padrão do relatório",
+            tipo=CampoTipo.RICHTEXT,
+        )
+        CampoValor.objects.create(
+            definicao=cd_texto,
+            programa=prog,
+            valor=self._doc(
+                self._par(
+                    self._txt("Atividade realizada na escola "),
+                    self._var_text("nome_escola"),
+                    self._txt("."),
+                )
+            ),
+        )
+
+        template_json = self._doc(
+            {"type": "var_richtext", "attrs": {"ref": "texto_padrao"}}
+        )
+
+        # Nenhum projeto foi informado — só cliente/programa, como acontece na
+        # tela de gerar relatório antes do usuário escolher o projeto.
+        nivel = scan_required_nivel(template_json, cliente=cli, programa=prog)
+        self.assertEqual(nivel, "projeto")
+
+
+class TemplateNivelExigidoViewTest(TestCase):
+    """GET /templates/<id>/nivel-exigido/ — front-end consulta esse endpoint
+    em vez de reimplementar scan_required_nivel no cliente."""
+
+    def _doc(self, *blocos):
+        return {"type": "doc", "content": list(blocos)}
+
+    def _par(self, *inline):
+        return {"type": "paragraph", "content": list(inline)}
+
+    def _txt(self, texto):
+        return {"type": "text", "text": texto}
+
+    def _var_text(self, ref):
+        return {"type": "var_text", "attrs": {"ref": ref}}
+
+    def setUp(self):
+        self.client_api = APIClient()
+        self.user_admin = User.objects.create_user(
+            email="admin_nivel@test.com", password="pass", full_name="Admin"
+        )
+        MembroGeRelat.objects.create(user=self.user_admin)
+        self.client_api.force_authenticate(user=self.user_admin)
+
+        self.cliente = Cliente.objects.create(
+            nome="Brisa",
+            cnpj="33333333333333",
+            nome_contato="C3",
+            email_contato="c3@c.com",
+            fone_contato="3333",
+            numero_contrato="103",
+            data_termino_contrato="2030-01-01",
+        )
+        self.programa = Programa.objects.create(nome="TIC57", cliente=self.cliente)
+
+        CampoDefinicao.objects.create(
+            programa=self.programa,
+            nivel_aplicacao=NivelAplicacao.PROJETO,
+            referencia="nome_escola",
+            descricao="Escola atendida pelo projeto",
+            tipo=CampoTipo.TEXT,
+        )
+        cd_texto = CampoDefinicao.objects.create(
+            programa=self.programa,
+            nivel_aplicacao=NivelAplicacao.PROGRAMA,
+            referencia="texto_padrao",
+            descricao="Parágrafo padrão do relatório",
+            tipo=CampoTipo.RICHTEXT,
+        )
+        CampoValor.objects.create(
+            definicao=cd_texto,
+            programa=self.programa,
+            valor=self._doc(
+                self._par(
+                    self._txt("Atividade realizada na escola "),
+                    self._var_text("nome_escola"),
+                    self._txt("."),
+                )
+            ),
+        )
+
+        self.template = Template.objects.create(
+            nome="Relatório Programa",
+            programa=self.programa,
+            nivel=NivelTemplate.PROGRAMA,
+            modelo_arquivo_base="",
+            modelo_json=self._doc(
+                {"type": "var_richtext", "attrs": {"ref": "texto_padrao"}}
+            ),
+        )
+
+    def test_nivel_exigido_reflete_dependencia_transitiva_do_texto_rico(self):
+        res = self.client_api.get(
+            f"/templates/{self.template.id}/nivel-exigido/",
+            {"programa_id": self.programa.id},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["nivel_exigido"], "projeto")
+
+    def test_nivel_exigido_null_quando_nao_ha_dependencia_de_nivel(self):
+        template_simples = Template.objects.create(
+            nome="Relatório Simples",
+            programa=self.programa,
+            nivel=NivelTemplate.PROGRAMA,
+            modelo_arquivo_base="",
+            modelo_json=self._doc(self._par(self._txt("Sem variáveis."))),
+        )
+        res = self.client_api.get(
+            f"/templates/{template_simples.id}/nivel-exigido/",
+            {"programa_id": self.programa.id},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNone(res.data["nivel_exigido"])
+
 
 class CabecalhoLogosTest(TestCase):
     """Cabeçalho de página do .docx com as logomarcas do cliente e da parceira

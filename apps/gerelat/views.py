@@ -38,6 +38,7 @@ from .document_engine.renderer import (
     logos_cabecalho_de_metadados,
     prosemirror_to_docx,
 )
+from .document_engine.scope import scan_required_nivel
 from .document_engine.system_fields import get_system_fields_for_level
 from .document_engine.utils import (
     build_docx_filename_and_content_disposition,
@@ -717,6 +718,50 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
         documento_json = replace_placeholders(template.modelo_json, variables)
         return Response({"documento_json": documento_json})
+
+    @action(detail=True, methods=["get"], url_path="nivel-exigido")
+    def nivel_exigido(self, request, pk=None):
+        """
+        Nível mais profundo (cliente/programa/projeto/evento) exigido para
+        resolver todos os gaps do template dada a cadeia de instâncias já
+        conhecida — inclusive os usados apenas transitivamente, dentro do
+        valor de variáveis de texto rico citadas pelo template
+        (`document_engine.scope.scan_required_nivel`).
+
+        Usado pelo front-end para decidir quais seletores mostrar como
+        obrigatórios *antes* de tentar gerar o relatório, sem precisar
+        replicar a varredura de `scan_required_nivel` no cliente.
+        """
+        template = self.get_object()
+        if not template.modelo_json:
+            return Response(
+                {
+                    "detail": "Template não possui modelo_json. Use um template criado pelo editor."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cliente = programa = projeto = None
+        cliente_id = request.query_params.get("cliente_id")
+        programa_id = request.query_params.get("programa_id")
+        projeto_id = request.query_params.get("projeto_id")
+
+        if projeto_id:
+            projeto = Projeto.objects.select_related("programa__cliente").get(
+                id=projeto_id
+            )
+            programa = projeto.programa
+            cliente = programa.cliente
+        elif programa_id:
+            programa = Programa.objects.select_related("cliente").get(id=programa_id)
+            cliente = programa.cliente
+        elif cliente_id:
+            cliente = Cliente.objects.get(id=cliente_id)
+
+        nivel = scan_required_nivel(
+            template.modelo_json, cliente=cliente, programa=programa, projeto=projeto
+        )
+        return Response({"nivel_exigido": nivel})
 
     @action(detail=False, methods=["get"], url_path="variaveis-disponiveis")
     def variaveis_disponiveis(self, request):
