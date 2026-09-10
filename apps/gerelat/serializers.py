@@ -520,6 +520,14 @@ class RelatorioSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class DashboardResumoSerializer(serializers.Serializer):
+    programas = serializers.IntegerField()
+    projetos = serializers.IntegerField()
+    eventos = serializers.IntegerField()
+    templates = serializers.IntegerField()
+    relatorios = serializers.IntegerField()
+
+
 class AgendamentoRelatorioSerializer(serializers.ModelSerializer):
     template_nome = serializers.CharField(source="template.nome", read_only=True)
     criado_por_nome = serializers.CharField(

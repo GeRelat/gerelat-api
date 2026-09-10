@@ -669,6 +669,107 @@ class AgendamentoRelatorioConcorrenciaTest(TransactionTestCase):
         self.assertEqual(mock_delay.call_count, 1)
 
 
+class DashboardResumoTest(TestCase):
+    def setUp(self):
+        self.client_api = APIClient()
+        self.admin = User.objects.create_superuser(
+            email="admin_dash@test.com",
+            password="password123",
+            full_name="Admin Dash",
+        )
+        self.cli1 = Cliente.objects.create(
+            nome="Cliente Dash 1",
+            cnpj="11111111111111",
+            data_termino_contrato="2030-01-01",
+        )
+        self.prog1 = Programa.objects.create(nome="Prog Dash 1", cliente=self.cli1)
+        self.proj1 = Projeto.objects.create(nome="Proj Dash 1", programa=self.prog1)
+        self.ce1 = ClasseEvento.objects.create(
+            projeto=self.proj1, nome_classe="Classe 1"
+        )
+        self.evento1 = Evento.objects.create(
+            projeto=self.proj1,
+            classe_evento=self.ce1,
+            nome="Evento Dash 1",
+            data="2026-09-10",
+        )
+        self.template1 = Template.objects.create(
+            projeto=self.proj1,
+            nivel=NivelTemplate.PROJETO,
+            nome="Template Dash 1",
+            modelo_json={"type": "doc", "content": []},
+        )
+        self.relatorio1 = Relatorio.objects.create(
+            projeto=self.proj1,
+            template=self.template1,
+            nome="Relatorio Dash 1",
+            status="SUCCESS",
+            documento_json={"type": "doc", "content": []},
+        )
+
+        # Segundo cliente
+        self.cli2 = Cliente.objects.create(
+            nome="Cliente Dash 2",
+            cnpj="22222222222222",
+            data_termino_contrato="2030-01-01",
+        )
+        self.prog2 = Programa.objects.create(nome="Prog Dash 2", cliente=self.cli2)
+        self.proj2 = Projeto.objects.create(nome="Proj Dash 2", programa=self.prog2)
+
+    def test_admin_resumo_global_e_filtrado(self):
+        self.client_api.force_authenticate(user=self.admin)
+
+        # Global
+        res_global = self.client_api.get("/dashboard/resumo/")
+        self.assertEqual(res_global.status_code, 200)
+        data_global = res_global.json()
+        self.assertEqual(data_global["programas"], 2)
+        self.assertEqual(data_global["projetos"], 2)
+        self.assertEqual(data_global["eventos"], 1)
+        self.assertEqual(data_global["templates"], 1)
+        self.assertEqual(data_global["relatorios"], 1)
+
+        # Filtrado por cliente 1
+        res_cli1 = self.client_api.get(f"/dashboard/resumo/?cliente_id={self.cli1.id}")
+        self.assertEqual(res_cli1.status_code, 200)
+        data_cli1 = res_cli1.json()
+        self.assertEqual(data_cli1["programas"], 1)
+        self.assertEqual(data_cli1["projetos"], 1)
+        self.assertEqual(data_cli1["eventos"], 1)
+        self.assertEqual(data_cli1["templates"], 1)
+        self.assertEqual(data_cli1["relatorios"], 1)
+
+        # Filtrado por cliente 2
+        res_cli2 = self.client_api.get(f"/dashboard/resumo/?cliente_id={self.cli2.id}")
+        self.assertEqual(res_cli2.status_code, 200)
+        data_cli2 = res_cli2.json()
+        self.assertEqual(data_cli2["programas"], 1)
+        self.assertEqual(data_cli2["projetos"], 1)
+        self.assertEqual(data_cli2["eventos"], 0)
+        self.assertEqual(data_cli2["templates"], 0)
+        self.assertEqual(data_cli2["relatorios"], 0)
+
+    def test_membro_projeto_resumo_escopado(self):
+        user_membro = User.objects.create_user(
+            email="membro_dash@test.com",
+            password="password123",
+            full_name="Membro Dash",
+        )
+        MembroProjeto.objects.create(user=user_membro, projeto=self.proj1)
+
+        client_membro = APIClient()
+        client_membro.force_authenticate(user=user_membro)
+
+        res = client_membro.get("/dashboard/resumo/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["programas"], 1)  # Herdado via projeto
+        self.assertEqual(data["projetos"], 1)
+        self.assertEqual(data["eventos"], 1)
+        self.assertEqual(data["templates"], 1)
+        self.assertEqual(data["relatorios"], 1)
+
+
 class ClienteSerializerTest(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()

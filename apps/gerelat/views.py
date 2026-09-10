@@ -77,6 +77,7 @@ from .serializers import (
     CampoValorSerializer,
     ClasseEventoSerializer,
     ClienteSerializer,
+    DashboardResumoSerializer,
     EquipeProgramaSerializer,
     EquipeProjetoSerializer,
     EventoSerializer,
@@ -1767,3 +1768,137 @@ class MembroProjetoViewSet(viewsets.ModelViewSet):
         ).select_related(
             "user", "projeto", "projeto__programa", "projeto__programa__cliente"
         )
+
+
+class DashboardResumoView(APIView):
+    """Retorna contadores de entidades para o resumo do dashboard respeitando o escopo do usuário."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="cliente_id",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Filtrar métricas por ID do cliente",
+            ),
+        ],
+        responses={200: DashboardResumoSerializer},
+    )
+    def get(self, request):
+        user = request.user
+        cliente_id_param = request.query_params.get(
+            "cliente_id"
+        ) or request.query_params.get("cliente")
+        cliente_id = None
+        if cliente_id_param:
+            try:
+                cliente_id = int(cliente_id_param)
+            except (ValueError, TypeError):
+                cliente_id = None
+
+        if perms.is_platform_admin(user):
+            qs_programas = Programa.objects.all()
+            qs_projetos = Projeto.objects.all()
+            qs_eventos = Evento.objects.all()
+            qs_templates = Template.objects.all()
+            qs_relatorios = Relatorio.objects.all()
+
+            if cliente_id is not None:
+                qs_programas = qs_programas.filter(cliente_id=cliente_id)
+                qs_projetos = qs_projetos.filter(programa__cliente_id=cliente_id)
+                qs_eventos = qs_eventos.filter(
+                    Q(cliente_id=cliente_id)
+                    | Q(programa__cliente_id=cliente_id)
+                    | Q(projeto__programa__cliente_id=cliente_id)
+                )
+                qs_templates = qs_templates.filter(
+                    Q(cliente_id=cliente_id)
+                    | Q(programa__cliente_id=cliente_id)
+                    | Q(projeto__programa__cliente_id=cliente_id)
+                )
+                qs_relatorios = qs_relatorios.filter(
+                    Q(projeto__programa__cliente_id=cliente_id)
+                    | Q(evento__projeto__programa__cliente_id=cliente_id)
+                    | Q(evento__programa__cliente_id=cliente_id)
+                    | Q(evento__cliente_id=cliente_id)
+                )
+        else:
+            clientes_admin = Cliente.objects.filter(membros__user=user)
+            programas_membro = MembroPrograma.objects.filter(user=user).values(
+                "programa"
+            )
+            projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
+            programas_via_projetos = MembroProjeto.objects.filter(user=user).values(
+                "projeto__programa"
+            )
+
+            qs_programas = Programa.objects.filter(
+                Q(cliente__in=clientes_admin)
+                | Q(id__in=programas_membro)
+                | Q(id__in=programas_via_projetos)
+            )
+            qs_projetos = Projeto.objects.filter(
+                Q(programa__cliente__in=clientes_admin)
+                | Q(programa__in=programas_membro)
+                | Q(id__in=projetos_membro)
+            )
+            qs_eventos = Evento.objects.filter(
+                Q(cliente__in=clientes_admin)
+                | Q(programa__in=programas_membro)
+                | Q(programa__cliente__in=clientes_admin)
+                | Q(projeto__in=projetos_membro)
+                | Q(projeto__programa__in=programas_membro)
+                | Q(projeto__programa__cliente__in=clientes_admin)
+            )
+            qs_templates = Template.objects.filter(
+                Q(cliente__in=clientes_admin)
+                | Q(programa__in=programas_membro)
+                | Q(programa__in=programas_via_projetos)
+                | Q(programa__cliente__in=clientes_admin)
+                | Q(projeto__in=projetos_membro)
+                | Q(projeto__programa__in=programas_membro)
+                | Q(projeto__programa__cliente__in=clientes_admin)
+            )
+            qs_relatorios = Relatorio.objects.filter(
+                Q(projeto__in=projetos_membro)
+                | Q(projeto__programa__in=programas_membro)
+                | Q(projeto__programa__cliente__in=clientes_admin)
+                | Q(evento__projeto__programa__cliente__in=clientes_admin)
+                | Q(evento__projeto__programa__in=programas_membro)
+                | Q(evento__projeto__in=projetos_membro)
+                | Q(evento__programa__cliente__in=clientes_admin)
+                | Q(evento__programa__in=programas_membro)
+                | Q(evento__cliente__in=clientes_admin)
+            )
+
+            if cliente_id is not None:
+                qs_programas = qs_programas.filter(cliente_id=cliente_id)
+                qs_projetos = qs_projetos.filter(programa__cliente_id=cliente_id)
+                qs_eventos = qs_eventos.filter(
+                    Q(cliente_id=cliente_id)
+                    | Q(programa__cliente_id=cliente_id)
+                    | Q(projeto__programa__cliente_id=cliente_id)
+                )
+                qs_templates = qs_templates.filter(
+                    Q(cliente_id=cliente_id)
+                    | Q(programa__cliente_id=cliente_id)
+                    | Q(projeto__programa__cliente_id=cliente_id)
+                )
+                qs_relatorios = qs_relatorios.filter(
+                    Q(projeto__programa__cliente_id=cliente_id)
+                    | Q(evento__projeto__programa__cliente_id=cliente_id)
+                    | Q(evento__programa__cliente_id=cliente_id)
+                    | Q(evento__cliente_id=cliente_id)
+                )
+
+        dados = {
+            "programas": qs_programas.distinct().count(),
+            "projetos": qs_projetos.distinct().count(),
+            "eventos": qs_eventos.distinct().count(),
+            "templates": qs_templates.distinct().count(),
+            "relatorios": qs_relatorios.distinct().count(),
+        }
+        return Response(dados)
