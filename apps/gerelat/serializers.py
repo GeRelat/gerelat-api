@@ -511,6 +511,10 @@ class TemplateClasseEventoSerializer(serializers.ModelSerializer):
 
 
 class RelatorioSerializer(serializers.ModelSerializer):
+    projeto_nome = serializers.CharField(
+        source="projeto.nome", read_only=True, allow_null=True
+    )
+
     class Meta:
         model = Relatorio
         fields = "__all__"
@@ -973,6 +977,14 @@ class RelatorioGenerateRequestSerializer(serializers.Serializer):
                 )
             cliente = cliente or programa.cliente
 
+        if not projeto and template.projeto_id:
+            projeto = template.projeto
+
+        if not projeto:
+            raise serializers.ValidationError(
+                {"projeto": "O projeto é obrigatório para gerar o relatório."}
+            )
+
         documento_json = attrs.get("documento_json")
         if documento_json is not None and (
             not isinstance(documento_json, dict) or documento_json.get("type") != "doc"
@@ -1023,16 +1035,14 @@ class RelatorioGenerateRequestSerializer(serializers.Serializer):
         prog_ids = {
             i["equipe_programa"] for i in assinaturas if i.get("equipe_programa")
         }
-        proj_ids = {
-            i["equipe_projeto"] for i in assinaturas if i.get("equipe_projeto")
-        }
+        proj_ids = {i["equipe_projeto"] for i in assinaturas if i.get("equipe_projeto")}
 
         equipes_prog = EquipePrograma.objects.filter(id__in=prog_ids).select_related(
             "programa"
         )
-        equipes_proj = EquipeProjeto.objects.filter(
-            id__in=proj_ids
-        ).select_related("projeto__programa")
+        equipes_proj = EquipeProjeto.objects.filter(id__in=proj_ids).select_related(
+            "projeto__programa"
+        )
 
         if equipes_prog.count() != len(prog_ids) or equipes_proj.count() != len(
             proj_ids

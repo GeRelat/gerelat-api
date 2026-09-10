@@ -680,7 +680,6 @@ class Template(models.Model):
     projeto_id: int
     nivel = models.CharField(max_length=20, choices=NivelTemplate.choices)
     nome = models.CharField(max_length=150)
-    modelo_arquivo_base = models.CharField(max_length=255)
     data_criacao = models.DateTimeField(auto_now_add=True)
     ultima_atualizacao = models.DateTimeField(auto_now=True)
     modelo_json = models.JSONField(default=dict, blank=False, null=False)
@@ -1075,6 +1074,11 @@ def sincronizar_asset_uso_logomarca(entidade, tipo_uso: str):
 
 class Relatorio(models.Model):
     id = models.AutoField(primary_key=True)
+    projeto = models.ForeignKey(
+        Projeto,
+        on_delete=models.CASCADE,
+        related_name="relatorios",
+    )
     evento = models.ForeignKey(
         Evento,
         on_delete=models.SET_NULL,
@@ -1085,7 +1089,6 @@ class Relatorio(models.Model):
     template = models.ForeignKey(
         Template, on_delete=models.PROTECT, related_name="relatorios"
     )
-    arquivo_gerado = models.CharField(max_length=255)
     nome = models.CharField(max_length=150, blank=True, default="")
     status = models.CharField(max_length=50)
     metadados = models.JSONField(default=dict, blank=True)

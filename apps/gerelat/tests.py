@@ -465,6 +465,60 @@ class RelatorioGenerateTest(TestCase):
         response = self.client_api.post("/relatorios/", payload, format="json")
         self.assertEqual(response.status_code, 400)
 
+    def test_relatorio_create_sem_projeto_e_sem_evento_rejeita(self):
+        template_programa = Template.objects.create(
+            programa=self.prog,
+            nivel=NivelTemplate.PROGRAMA,
+            nome="Template Prog",
+            modelo_json={"type": "doc", "content": []},
+        )
+        payload = {
+            "template": template_programa.id,
+        }
+        response = self.client_api.post("/relatorios/", payload, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("projeto", response.json())
+
+    def test_relatorio_queryset_membro_projeto_enxerga_relatorio_sem_evento(self):
+        user_membro = User.objects.create_user(
+            email="membro_proj@test.com", password="password123", full_name="Membro"
+        )
+        MembroProjeto.objects.create(user=user_membro, projeto=self.proj)
+
+        rel = Relatorio.objects.create(
+            projeto=self.proj,
+            template=self.template,
+            nome="Relatorio Direto do Projeto",
+            status="SUCCESS",
+            documento_json={"type": "doc", "content": []},
+        )
+
+        client_membro = APIClient()
+        client_membro.force_authenticate(user=user_membro)
+        response = client_membro.get("/relatorios/")
+        self.assertEqual(response.status_code, 200)
+        ids = [item["id"] for item in response.json()]
+        self.assertIn(rel.id, ids)
+
+    def test_template_queryset_membro_projeto_enxerga_template_do_programa(self):
+        template_programa = Template.objects.create(
+            programa=self.prog,
+            nivel=NivelTemplate.PROGRAMA,
+            nome="Template Herdado do Programa",
+            modelo_json={"type": "doc", "content": []},
+        )
+        user_membro = User.objects.create_user(
+            email="membro_p2@test.com", password="password123", full_name="Membro 2"
+        )
+        MembroProjeto.objects.create(user=user_membro, projeto=self.proj)
+
+        client_membro = APIClient()
+        client_membro.force_authenticate(user=user_membro)
+        response = client_membro.get("/templates/")
+        self.assertEqual(response.status_code, 200)
+        ids = [item["id"] for item in response.json()]
+        self.assertIn(template_programa.id, ids)
+
 
 class AssetLogomarcaTest(TestCase):
     def setUp(self):
@@ -1765,7 +1819,6 @@ class TemplateNivelExigidoViewTest(TestCase):
             nome="Relatório Programa",
             programa=self.programa,
             nivel=NivelTemplate.PROGRAMA,
-            modelo_arquivo_base="",
             modelo_json=self._doc(
                 {"type": "var_richtext", "attrs": {"ref": "texto_padrao"}}
             ),
@@ -1784,7 +1837,6 @@ class TemplateNivelExigidoViewTest(TestCase):
             nome="Relatório Simples",
             programa=self.programa,
             nivel=NivelTemplate.PROGRAMA,
-            modelo_arquivo_base="",
             modelo_json=self._doc(self._par(self._txt("Sem variáveis."))),
         )
         res = self.client_api.get(
@@ -1942,7 +1994,9 @@ class CabecalhoLogosTest(TestCase):
             modelo_json=self._DOC,
         )
         resultado = _do_generate_relatorio(
-            programa_id=self.prog.id, template_id=template.id
+            projeto_id=self.proj.id,
+            programa_id=self.prog.id,
+            template_id=template.id,
         )
         rel = Relatorio.objects.get(id=resultado["id"])
         self.cli.refresh_from_db()

@@ -42,8 +42,6 @@ from .document_engine.scope import scan_required_nivel
 from .document_engine.system_fields import get_system_fields_for_level
 from .document_engine.utils import (
     build_docx_filename_and_content_disposition,
-    build_render_context,
-    render_docx_from_template,
 )
 from .document_engine.variables import build_variables_context
 from .enums import NivelTemplate
@@ -612,10 +610,14 @@ class TemplateViewSet(viewsets.ModelViewSet):
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
+        programas_via_projetos = MembroProjeto.objects.filter(user=user).values(
+            "projeto__programa"
+        )
         return (
             Template.objects.filter(
                 Q(cliente__in=clientes_admin)
                 | Q(programa__in=programas_membro)
+                | Q(programa__in=programas_via_projetos)
                 | Q(programa__cliente__in=clientes_admin)
                 | Q(projeto__in=projetos_membro)
                 | Q(projeto__programa__in=programas_membro)
@@ -1176,13 +1178,18 @@ class RelatorioViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return Relatorio.objects.none()
         if perms.is_platform_admin(user):
-            return Relatorio.objects.all().select_related("template", "evento")
+            return Relatorio.objects.all().select_related(
+                "template", "evento", "projeto"
+            )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
         return (
             Relatorio.objects.filter(
-                Q(evento__projeto__programa__cliente__in=clientes_admin)
+                Q(projeto__in=projetos_membro)
+                | Q(projeto__programa__in=programas_membro)
+                | Q(projeto__programa__cliente__in=clientes_admin)
+                | Q(evento__projeto__programa__cliente__in=clientes_admin)
                 | Q(evento__projeto__programa__in=programas_membro)
                 | Q(evento__projeto__in=projetos_membro)
                 | Q(evento__programa__cliente__in=clientes_admin)
@@ -1190,7 +1197,7 @@ class RelatorioViewSet(viewsets.ModelViewSet):
                 | Q(evento__cliente__in=clientes_admin)
             )
             .distinct()
-            .select_related("template", "evento")
+            .select_related("template", "evento", "projeto")
         )
 
     @extend_schema(
@@ -1268,10 +1275,11 @@ class RelatorioViewSet(viewsets.ModelViewSet):
             rendered = replace_placeholders(template.modelo_json, variables)
             output_buffer = prosemirror_to_docx(rendered, **extras)
         else:
-            # ── Legacy pipeline: docxtpl ───────────────────────
-            context = build_render_context(variables)
-            output_buffer = render_docx_from_template(
-                template.modelo_arquivo_base, context
+            return Response(
+                {
+                    "detail": "Relatório não possui documento_json ou modelo_json válido para download."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         content_disp = build_docx_filename_and_content_disposition(
