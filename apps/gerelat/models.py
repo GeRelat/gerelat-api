@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
 from .document_engine import validate_document_value
@@ -960,9 +960,33 @@ def _ao_salvar_programa(sender, instance, **kwargs):
     sincronizar_asset_uso_logomarca(instance, AssetUso.TIPO_USO_LOGOMARCA_PROGRAMA)
 
 
+@receiver(pre_save, sender=Cliente)
+def _ao_pre_salvar_cliente(sender, instance, **kwargs):
+    if instance.pk:
+        try:
+            antigo = (
+                Cliente.objects.filter(pk=instance.pk).values("logomarca_id").first()
+            )
+            instance._antigo_logomarca_id = antigo["logomarca_id"] if antigo else None
+        except Exception:
+            instance._antigo_logomarca_id = None
+    else:
+        instance._antigo_logomarca_id = None
+
+
 @receiver(post_save, sender=Cliente)
 def _ao_salvar_cliente(sender, instance, **kwargs):
+    antigo_logomarca_id = getattr(instance, "_antigo_logomarca_id", None)
+    novo_logomarca_id = instance.logomarca_id
     sincronizar_asset_uso_logomarca(instance, AssetUso.TIPO_USO_LOGOMARCA_CLIENTE)
+
+    if antigo_logomarca_id and antigo_logomarca_id != novo_logomarca_id:
+        try:
+            antigo_asset = Asset.objects.get(pk=antigo_logomarca_id)
+            antigo_asset.usos.all().delete()
+            antigo_asset.delete()
+        except Asset.DoesNotExist:
+            pass
 
 
 @receiver(post_save, sender=Projeto)

@@ -573,6 +573,34 @@ class AssetLogomarcaTest(TestCase):
         self.assertIsNotNone(uso)
         self.assertEqual(uso.programa, self.programa)
 
+    def test_troca_logomarca_cliente_exclui_asset_anterior(self):
+        asset1 = Asset.objects.create(
+            arquivo="assets/logo-antiga.png", cliente=self.cliente
+        )
+        self.cliente.logomarca = asset1
+        self.cliente.save()
+
+        self.assertTrue(Asset.objects.filter(id=asset1.id).exists())
+        self.assertTrue(
+            AssetUso.objects.filter(
+                asset=asset1,
+                cliente=self.cliente,
+                tipo_uso=AssetUso.TIPO_USO_LOGOMARCA_CLIENTE,
+            ).exists()
+        )
+
+        # Troca para um novo asset
+        asset2 = Asset.objects.create(
+            arquivo="assets/logo-nova.png", cliente=self.cliente
+        )
+        self.cliente.logomarca = asset2
+        self.cliente.save()
+
+        # O asset1 anterior deve ter sido excluído do banco
+        self.assertFalse(Asset.objects.filter(id=asset1.id).exists())
+        self.assertTrue(Asset.objects.filter(id=asset2.id).exists())
+        self.assertEqual(self.cliente.logomarca, asset2)
+
 
 class AgendamentoRelatorioConcorrenciaTest(TransactionTestCase):
     def setUp(self):
