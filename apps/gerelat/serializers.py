@@ -216,36 +216,7 @@ class EquipeProjetoSerializer(serializers.ModelSerializer):
 class ClasseEventoSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClasseEvento
-        fields = "__all__"
-        extra_kwargs = {
-            "cliente": {"required": False, "allow_null": True},
-            "programa": {"required": False, "allow_null": True},
-            "projeto": {"required": False, "allow_null": True},
-        }
-
-    def validate(self, attrs):
-        cliente = (
-            attrs.get("cliente")
-            if "cliente" in attrs
-            else getattr(self.instance, "cliente", None)
-        )
-        programa = (
-            attrs.get("programa")
-            if "programa" in attrs
-            else getattr(self.instance, "programa", None)
-        )
-        projeto = (
-            attrs.get("projeto")
-            if "projeto" in attrs
-            else getattr(self.instance, "projeto", None)
-        )
-        scopes = [cliente, programa, projeto]
-        filled = [s for s in scopes if s is not None]
-        if len(filled) != 1:
-            raise serializers.ValidationError(
-                "Informe exatamente um escopo (cliente, programa ou projeto)."
-            )
-        return attrs
+        fields = ["id", "programa", "nome_classe"]
 
 
 class EventoSerializer(serializers.ModelSerializer):
@@ -253,35 +224,32 @@ class EventoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Evento
-        fields = "__all__"
-        extra_kwargs = {
-            "cliente": {"required": False, "allow_null": True},
-            "programa": {"required": False, "allow_null": True},
-            "projeto": {"required": False, "allow_null": True},
-        }
+        fields = [
+            "id",
+            "projeto",
+            "classe_evento",
+            "classe_evento_nome",
+            "nome",
+            "local",
+            "endereco",
+            "data",
+            "objetivo",
+        ]
 
     def validate(self, attrs):
-        cliente = (
-            attrs.get("cliente")
-            if "cliente" in attrs
-            else getattr(self.instance, "cliente", None)
+        projeto = attrs.get("projeto") or getattr(self.instance, "projeto", None)
+        classe_evento = attrs.get("classe_evento") or getattr(
+            self.instance, "classe_evento", None
         )
-        programa = (
-            attrs.get("programa")
-            if "programa" in attrs
-            else getattr(self.instance, "programa", None)
-        )
-        projeto = (
-            attrs.get("projeto")
-            if "projeto" in attrs
-            else getattr(self.instance, "projeto", None)
-        )
-        scopes = [cliente, programa, projeto]
-        filled = [s for s in scopes if s is not None]
-        if len(filled) != 1:
-            raise serializers.ValidationError(
-                "Informe exatamente um escopo (cliente, programa ou projeto)."
-            )
+        if projeto and classe_evento:
+            if classe_evento.programa_id != projeto.programa_id:
+                raise serializers.ValidationError(
+                    {
+                        "classe_evento": (
+                            "A Classe de Evento deve pertencer ao Programa do Projeto selecionado."
+                        )
+                    }
+                )
         return attrs
 
 
@@ -630,13 +598,21 @@ class AgendamentoRelatorioSerializer(serializers.ModelSerializer):
 
         evento = attrs.get("evento", self.instance.evento if self.instance else None)
         if evento and template:
-            evento_scope = (evento.cliente_id, evento.programa_id, evento.projeto_id)
-            template_scope = (
-                template.cliente_id,
-                template.programa_id,
-                template.projeto_id,
-            )
-            if evento_scope != template_scope:
+            incompativel = False
+            if template.projeto_id and evento.projeto_id != template.projeto_id:
+                incompativel = True
+            elif (
+                template.programa_id
+                and evento.projeto.programa_id != template.programa_id
+            ):
+                incompativel = True
+            elif (
+                template.cliente_id
+                and evento.projeto.programa.cliente_id != template.cliente_id
+            ):
+                incompativel = True
+
+            if incompativel:
                 if self.instance and "template" in attrs and "evento" not in attrs:
                     attrs["evento"] = None
                 else:
@@ -948,24 +924,13 @@ class RelatorioGenerateRequestSerializer(serializers.Serializer):
                 raise serializers.ValidationError(
                     "O evento selecionado não é elegível para este template (escopo ou classe de evento incompatível)."
                 )
-            if evento.projeto_id:
-                if projeto and projeto.id != evento.projeto_id:
-                    raise serializers.ValidationError(
-                        "O evento informado não pertence ao projeto informado."
-                    )
-                projeto = projeto or evento.projeto
-            elif evento.programa_id:
-                if programa and programa.id != evento.programa_id:
-                    raise serializers.ValidationError(
-                        "O evento informado não pertence ao programa informado."
-                    )
-                programa = programa or evento.programa
-            elif evento.cliente_id:
-                if cliente and cliente.id != evento.cliente_id:
-                    raise serializers.ValidationError(
-                        "O evento informado não pertence ao cliente informado."
-                    )
-                cliente = cliente or evento.cliente
+            if projeto and projeto.id != evento.projeto_id:
+                raise serializers.ValidationError(
+                    "O evento informado não pertence ao projeto informado."
+                )
+            projeto = projeto or evento.projeto
+            programa = programa or projeto.programa
+            cliente = cliente or programa.cliente
 
         if projeto:
             if programa and programa.id != projeto.programa_id:

@@ -33,18 +33,11 @@ def _resolve_chain(
         try:
             evento = Evento.objects.select_related(
                 "projeto__programa__cliente",
-                "programa__cliente",
-                "cliente",
             ).get(id=evento_id)
             if evento.projeto:
                 projeto = evento.projeto
                 programa = projeto.programa
                 cliente = programa.cliente
-            elif evento.programa:
-                programa = evento.programa
-                cliente = programa.cliente
-            elif evento.cliente:
-                cliente = evento.cliente
         except Evento.DoesNotExist:
             evento = None
 

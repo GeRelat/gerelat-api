@@ -35,6 +35,7 @@ from apps.gerelat.permissions import PodeAcessarProjeto
 from apps.gerelat.serializers import (
     AgendamentoRelatorioSerializer,
     ClienteSerializer,
+    EventoSerializer,
     TemplateClasseEventoSerializer,
 )
 from apps.gerelat.services.agendamento_relatorio import (
@@ -353,14 +354,15 @@ class EventosRelatorioTest(TestCase):
             data_termino_contrato="2030-01-01",
         )
         self.prog = Programa.objects.create(nome="Prog E", cliente=self.cli)
+        self.outro_prog = Programa.objects.create(nome="Outro Prog E", cliente=self.cli)
         self.proj1 = Projeto.objects.create(nome="Proj 1", programa=self.prog)
         self.proj2 = Projeto.objects.create(nome="Proj 2", programa=self.prog)
 
-        self.ce_proj1 = ClasseEvento.objects.create(
-            projeto=self.proj1, nome_classe="Reunião Proj 1"
-        )
         self.ce_prog = ClasseEvento.objects.create(
             programa=self.prog, nome_classe="Reunião Prog"
+        )
+        self.ce_outro_prog = ClasseEvento.objects.create(
+            programa=self.outro_prog, nome_classe="Reunião Outro Prog"
         )
 
         self.template_proj1 = Template.objects.create(
@@ -370,18 +372,18 @@ class EventosRelatorioTest(TestCase):
             modelo_json={"type": "doc", "content": []},
         )
         TemplateClasseEvento.objects.create(
-            template=self.template_proj1, classe_evento=self.ce_proj1
+            template=self.template_proj1, classe_evento=self.ce_prog
         )
 
         self.evento_valido = Evento.objects.create(
             projeto=self.proj1,
-            classe_evento=self.ce_proj1,
+            classe_evento=self.ce_prog,
             nome="Evento Valido",
             data="2026-08-10",
         )
         self.evento_proj2 = Evento.objects.create(
             projeto=self.proj2,
-            classe_evento=self.ce_proj1,
+            classe_evento=self.ce_prog,
             nome="Evento Proj Outro",
             data="2026-08-10",
         )
@@ -403,15 +405,55 @@ class EventosRelatorioTest(TestCase):
         self.assertNotIn(self.evento_proj2, evs)
 
     def test_validar_classe_evento_mesmo_escopo(self):
-        # ce_prog is scope (programa=self.prog), template_proj1 is scope (projeto=self.proj1)
+        # ce_outro_prog is programa=self.outro_prog, template_proj1 belongs to self.proj1 (programa=self.prog)
         with self.assertRaises(ValidationError):
-            validar_classe_evento_mesmo_escopo(self.template_proj1, self.ce_prog)
+            validar_classe_evento_mesmo_escopo(self.template_proj1, self.ce_outro_prog)
 
         serializer = TemplateClasseEventoSerializer(
-            data={"template": self.template_proj1.id, "classe_evento": self.ce_prog.id}
+            data={
+                "template": self.template_proj1.id,
+                "classe_evento": self.ce_outro_prog.id,
+            }
         )
         self.assertFalse(serializer.is_valid())
         self.assertIn("non_field_errors", serializer.errors)
+
+    def test_evento_serializer_rejeita_classe_de_outro_programa(self):
+        serializer = EventoSerializer(
+            data={
+                "projeto": self.proj1.id,
+                "classe_evento": self.ce_outro_prog.id,
+                "nome": "Oficina X",
+                "data": "2026-09-01",
+            }
+        )
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("classe_evento", serializer.errors)
+
+    def test_membro_projeto_le_classe_programa_mas_nao_cria(self):
+        user_proj = User.objects.create_user(
+            email="membro.proj@test.com",
+            password="password123",
+            full_name="Membro Proj",
+        )
+        MembroProjeto.objects.create(user=user_proj, projeto=self.proj1)
+
+        client = APIClient()
+        client.force_authenticate(user=user_proj)
+
+        # GET /classes-evento/ deve listar a classe do programa pai
+        res = client.get("/classes-evento/")
+        self.assertEqual(res.status_code, 200)
+        classes_ids = [c["id"] for c in res.data]
+        self.assertIn(self.ce_prog.id, classes_ids)
+
+        # POST /classes-evento/ deve ser proibido (403) para membro de projeto
+        res_post = client.post(
+            "/classes-evento/",
+            {"programa": self.prog.id, "nome_classe": "Nova Classe Tentativa"},
+            format="json",
+        )
+        self.assertEqual(res_post.status_code, 403)
 
 
 class RelatorioGenerateTest(TestCase):
@@ -434,7 +476,9 @@ class RelatorioGenerateTest(TestCase):
         self.prog = Programa.objects.create(nome="Prog R", cliente=self.cli)
         self.proj = Projeto.objects.create(nome="Proj R", programa=self.prog)
 
-        self.ce = ClasseEvento.objects.create(projeto=self.proj, nome_classe="Classe R")
+        self.ce = ClasseEvento.objects.create(
+            programa=self.prog, nome_classe="Classe R"
+        )
         self.template = Template.objects.create(
             projeto=self.proj,
             nivel=NivelTemplate.PROJETO,
@@ -447,7 +491,7 @@ class RelatorioGenerateTest(TestCase):
         # Not linked via TemplateClasseEvento, or linked to another class
 
         self.ce_outra = ClasseEvento.objects.create(
-            projeto=self.proj, nome_classe="Classe Outra"
+            programa=self.prog, nome_classe="Classe Outra"
         )
         self.evento_incompativel = Evento.objects.create(
             projeto=self.proj,
@@ -685,7 +729,7 @@ class DashboardResumoTest(TestCase):
         self.prog1 = Programa.objects.create(nome="Prog Dash 1", cliente=self.cli1)
         self.proj1 = Projeto.objects.create(nome="Proj Dash 1", programa=self.prog1)
         self.ce1 = ClasseEvento.objects.create(
-            projeto=self.proj1, nome_classe="Classe 1"
+            programa=self.prog1, nome_classe="Classe 1"
         )
         self.evento1 = Evento.objects.create(
             projeto=self.proj1,
@@ -1526,12 +1570,14 @@ class AgendamentoRelatorioTest(TestCase):
             cliente=outro_cliente,
             modelo_json={},
         )
+        prog_swap = Programa.objects.create(nome="Prog Swap", cliente=self.cliente)
+        proj_swap = Projeto.objects.create(nome="Proj Swap", programa=prog_swap)
         ce_swap = ClasseEvento.objects.create(
-            cliente=self.cliente, nome_classe="Classe Swap"
+            programa=prog_swap, nome_classe="Classe Swap"
         )
         evento = Evento.objects.create(
             nome="Evento do Cliente Original",
-            cliente=self.cliente,
+            projeto=proj_swap,
             classe_evento=ce_swap,
             data="2026-08-10",
         )

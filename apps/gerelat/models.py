@@ -524,99 +524,34 @@ class EquipeProjeto(models.Model):
 
 
 class ClasseEvento(models.Model):
-    """Define uma classe de evento.
-
-    Escopo multi-nível: pode pertencer a Cliente, Programa ou Projeto.
-    Exatamente um dos três campos (cliente/programa/projeto) deve ser preenchido.
-    """
+    """Define uma classe de evento pertencente a um Programa."""
 
     id = models.AutoField(primary_key=True)
-    cliente = models.ForeignKey(
-        Cliente,
-        on_delete=models.CASCADE,
-        related_name="classes_evento",
-        null=True,
-        blank=True,
-    )
     programa = models.ForeignKey(
         Programa,
         on_delete=models.CASCADE,
         related_name="classes_evento",
-        null=True,
-        blank=True,
     )
-    projeto = models.ForeignKey(
-        Projeto,
-        on_delete=models.CASCADE,
-        related_name="classes_evento",
-        null=True,
-        blank=True,
-    )
-    cliente_id: int | None
-    programa_id: int | None
-    projeto_id: int | None
+    programa_id: int
     nome_classe = models.CharField(max_length=150)
 
     class Meta:
-        constraints = [
-            models.CheckConstraint(
-                condition=(
-                    Q(
-                        cliente__isnull=False,
-                        programa__isnull=True,
-                        projeto__isnull=True,
-                    )
-                    | Q(
-                        programa__isnull=False,
-                        cliente__isnull=True,
-                        projeto__isnull=True,
-                    )
-                    | Q(
-                        projeto__isnull=False,
-                        cliente__isnull=True,
-                        programa__isnull=True,
-                    )
-                ),
-                name="classe_evento_exactly_one_scope",
-            )
-        ]
+        ordering = ["nome_classe"]
 
     def __str__(self):
         return self.nome_classe
 
 
 class Evento(models.Model):
-    """Representa um evento.
-
-    Escopo multi-nível: pode pertencer a Cliente, Programa ou Projeto.
-    Exatamente um dos três campos (cliente/programa/projeto) deve ser preenchido.
-    """
+    """Representa um evento pertencente a um Projeto."""
 
     id = models.AutoField(primary_key=True)
-    cliente = models.ForeignKey(
-        Cliente,
-        on_delete=models.CASCADE,
-        related_name="eventos",
-        null=True,
-        blank=True,
-    )
-    programa = models.ForeignKey(
-        Programa,
-        on_delete=models.CASCADE,
-        related_name="eventos",
-        null=True,
-        blank=True,
-    )
     projeto = models.ForeignKey(
         Projeto,
         on_delete=models.CASCADE,
         related_name="eventos",
-        null=True,
-        blank=True,
     )
-    cliente_id: int | None
-    programa_id: int | None
-    projeto_id: int | None
+    projeto_id: int
     classe_evento = models.ForeignKey(
         ClasseEvento, on_delete=models.CASCADE, related_name="eventos"
     )
@@ -627,28 +562,7 @@ class Evento(models.Model):
     objetivo = models.TextField(blank=True, default="")
 
     class Meta:
-        constraints = [
-            models.CheckConstraint(
-                condition=(
-                    Q(
-                        cliente__isnull=False,
-                        programa__isnull=True,
-                        projeto__isnull=True,
-                    )
-                    | Q(
-                        programa__isnull=False,
-                        cliente__isnull=True,
-                        projeto__isnull=True,
-                    )
-                    | Q(
-                        projeto__isnull=False,
-                        cliente__isnull=True,
-                        programa__isnull=True,
-                    )
-                ),
-                name="evento_exactly_one_scope",
-            )
-        ]
+        ordering = ["-data", "nome"]
 
     def __str__(self):
         return self.nome

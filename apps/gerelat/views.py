@@ -545,23 +545,32 @@ class ClasseEventoViewSet(viewsets.ModelViewSet):
             return ClasseEvento.objects.none()
         if perms.is_platform_admin(user):
             return ClasseEvento.objects.all().select_related(
-                "cliente", "programa", "projeto"
+                "programa", "programa__cliente"
             )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
-        projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
+        programas_via_projetos = MembroProjeto.objects.filter(user=user).values(
+            "projeto__programa"
+        )
         return (
             ClasseEvento.objects.filter(
-                Q(cliente__in=clientes_admin)
+                Q(programa__cliente__in=clientes_admin)
                 | Q(programa__in=programas_membro)
-                | Q(programa__cliente__in=clientes_admin)
-                | Q(projeto__in=projetos_membro)
-                | Q(projeto__programa__in=programas_membro)
-                | Q(projeto__programa__cliente__in=clientes_admin)
+                | Q(programa__in=programas_via_projetos)
             )
             .distinct()
-            .select_related("cliente", "programa", "projeto")
+            .select_related("programa", "programa__cliente")
         )
+
+    def perform_create(self, serializer):
+        programa = serializer.validated_data.get("programa")
+        if programa:
+            nivel = perms.get_nivel_acesso_programa(self.request.user, programa)
+            if nivel not in ("admin_gerelat", "admin_cliente", "membro_programa"):
+                raise PermissionDenied(
+                    "Você não tem permissão para criar classes de evento neste programa."
+                )
+        serializer.save()
 
 
 class EventoViewSet(viewsets.ModelViewSet):
@@ -575,23 +584,30 @@ class EventoViewSet(viewsets.ModelViewSet):
             return Evento.objects.none()
         if perms.is_platform_admin(user):
             return Evento.objects.all().select_related(
-                "classe_evento", "cliente", "programa", "projeto"
+                "classe_evento", "projeto", "projeto__programa"
             )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
         return (
             Evento.objects.filter(
-                Q(cliente__in=clientes_admin)
-                | Q(programa__in=programas_membro)
-                | Q(programa__cliente__in=clientes_admin)
-                | Q(projeto__in=projetos_membro)
+                Q(projeto__programa__cliente__in=clientes_admin)
                 | Q(projeto__programa__in=programas_membro)
-                | Q(projeto__programa__cliente__in=clientes_admin)
+                | Q(projeto__in=projetos_membro)
             )
             .distinct()
-            .select_related("classe_evento", "cliente", "programa", "projeto")
+            .select_related("classe_evento", "projeto", "projeto__programa")
         )
+
+    def perform_create(self, serializer):
+        projeto = serializer.validated_data.get("projeto")
+        if projeto:
+            nivel = perms.get_nivel_acesso(self.request.user, projeto)
+            if nivel is None:
+                raise PermissionDenied(
+                    "Você não tem permissão para criar eventos neste projeto."
+                )
+        serializer.save()
 
 
 class TemplateViewSet(viewsets.ModelViewSet):
@@ -1190,12 +1206,6 @@ class RelatorioViewSet(viewsets.ModelViewSet):
                 Q(projeto__in=projetos_membro)
                 | Q(projeto__programa__in=programas_membro)
                 | Q(projeto__programa__cliente__in=clientes_admin)
-                | Q(evento__projeto__programa__cliente__in=clientes_admin)
-                | Q(evento__projeto__programa__in=programas_membro)
-                | Q(evento__projeto__in=projetos_membro)
-                | Q(evento__programa__cliente__in=clientes_admin)
-                | Q(evento__programa__in=programas_membro)
-                | Q(evento__cliente__in=clientes_admin)
             )
             .distinct()
             .select_related("template", "evento", "projeto")
@@ -1809,21 +1819,14 @@ class DashboardResumoView(APIView):
             if cliente_id is not None:
                 qs_programas = qs_programas.filter(cliente_id=cliente_id)
                 qs_projetos = qs_projetos.filter(programa__cliente_id=cliente_id)
-                qs_eventos = qs_eventos.filter(
-                    Q(cliente_id=cliente_id)
-                    | Q(programa__cliente_id=cliente_id)
-                    | Q(projeto__programa__cliente_id=cliente_id)
-                )
+                qs_eventos = qs_eventos.filter(projeto__programa__cliente_id=cliente_id)
                 qs_templates = qs_templates.filter(
                     Q(cliente_id=cliente_id)
                     | Q(programa__cliente_id=cliente_id)
                     | Q(projeto__programa__cliente_id=cliente_id)
                 )
                 qs_relatorios = qs_relatorios.filter(
-                    Q(projeto__programa__cliente_id=cliente_id)
-                    | Q(evento__projeto__programa__cliente_id=cliente_id)
-                    | Q(evento__programa__cliente_id=cliente_id)
-                    | Q(evento__cliente_id=cliente_id)
+                    projeto__programa__cliente_id=cliente_id
                 )
         else:
             clientes_admin = Cliente.objects.filter(membros__user=user)
@@ -1846,12 +1849,9 @@ class DashboardResumoView(APIView):
                 | Q(id__in=projetos_membro)
             )
             qs_eventos = Evento.objects.filter(
-                Q(cliente__in=clientes_admin)
-                | Q(programa__in=programas_membro)
-                | Q(programa__cliente__in=clientes_admin)
-                | Q(projeto__in=projetos_membro)
+                Q(projeto__programa__cliente__in=clientes_admin)
                 | Q(projeto__programa__in=programas_membro)
-                | Q(projeto__programa__cliente__in=clientes_admin)
+                | Q(projeto__in=projetos_membro)
             )
             qs_templates = Template.objects.filter(
                 Q(cliente__in=clientes_admin)
@@ -1866,12 +1866,6 @@ class DashboardResumoView(APIView):
                 Q(projeto__in=projetos_membro)
                 | Q(projeto__programa__in=programas_membro)
                 | Q(projeto__programa__cliente__in=clientes_admin)
-                | Q(evento__projeto__programa__cliente__in=clientes_admin)
-                | Q(evento__projeto__programa__in=programas_membro)
-                | Q(evento__projeto__in=projetos_membro)
-                | Q(evento__programa__cliente__in=clientes_admin)
-                | Q(evento__programa__in=programas_membro)
-                | Q(evento__cliente__in=clientes_admin)
             )
 
             if cliente_id is not None:
