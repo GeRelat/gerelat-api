@@ -813,6 +813,28 @@ class DashboardResumoTest(TestCase):
         self.assertEqual(data["templates"], 1)
         self.assertEqual(data["relatorios"], 1)
 
+        # Com filtro de cliente_id
+        res_filtrado = client_membro.get(
+            f"/dashboard/resumo/?cliente_id={self.cli1.id}"
+        )
+        self.assertEqual(res_filtrado.status_code, 200)
+        data_f = res_filtrado.json()
+        self.assertEqual(data_f["programas"], 1)
+        self.assertEqual(data_f["projetos"], 1)
+        self.assertEqual(data_f["eventos"], 1)
+        self.assertEqual(data_f["templates"], 1)
+        self.assertEqual(data_f["relatorios"], 1)
+
+        # Com filtro de outro cliente (sem acesso)
+        res_outro = client_membro.get(f"/dashboard/resumo/?cliente_id={self.cli2.id}")
+        self.assertEqual(res_outro.status_code, 200)
+        data_o = res_outro.json()
+        self.assertEqual(data_o["programas"], 0)
+        self.assertEqual(data_o["projetos"], 0)
+        self.assertEqual(data_o["eventos"], 0)
+        self.assertEqual(data_o["templates"], 0)
+        self.assertEqual(data_o["relatorios"], 0)
+
 
 class ClienteSerializerTest(TestCase):
     def setUp(self):

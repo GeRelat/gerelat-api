@@ -1336,9 +1336,6 @@ class AgendamentoRelatorioViewSet(viewsets.ModelViewSet):
                 | Q(evento__projeto__programa__cliente__in=clientes_admin)
                 | Q(evento__projeto__programa__in=programas_membro)
                 | Q(evento__projeto__in=projetos_membro)
-                | Q(evento__programa__cliente__in=clientes_admin)
-                | Q(evento__programa__in=programas_membro)
-                | Q(evento__cliente__in=clientes_admin)
             ).distinct()
 
         cliente_id = self.request.query_params.get("cliente_id")
@@ -1348,8 +1345,6 @@ class AgendamentoRelatorioViewSet(viewsets.ModelViewSet):
                 | Q(programa__cliente_id=cliente_id)
                 | Q(projeto__programa__cliente_id=cliente_id)
                 | Q(evento__projeto__programa__cliente_id=cliente_id)
-                | Q(evento__programa__cliente_id=cliente_id)
-                | Q(evento__cliente_id=cliente_id)
             )
 
         return qs
@@ -1871,21 +1866,14 @@ class DashboardResumoView(APIView):
             if cliente_id is not None:
                 qs_programas = qs_programas.filter(cliente_id=cliente_id)
                 qs_projetos = qs_projetos.filter(programa__cliente_id=cliente_id)
-                qs_eventos = qs_eventos.filter(
-                    Q(cliente_id=cliente_id)
-                    | Q(programa__cliente_id=cliente_id)
-                    | Q(projeto__programa__cliente_id=cliente_id)
-                )
+                qs_eventos = qs_eventos.filter(projeto__programa__cliente_id=cliente_id)
                 qs_templates = qs_templates.filter(
                     Q(cliente_id=cliente_id)
                     | Q(programa__cliente_id=cliente_id)
                     | Q(projeto__programa__cliente_id=cliente_id)
                 )
                 qs_relatorios = qs_relatorios.filter(
-                    Q(projeto__programa__cliente_id=cliente_id)
-                    | Q(evento__projeto__programa__cliente_id=cliente_id)
-                    | Q(evento__programa__cliente_id=cliente_id)
-                    | Q(evento__cliente_id=cliente_id)
+                    projeto__programa__cliente_id=cliente_id
                 )
 
         dados = {
