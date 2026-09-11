@@ -30,11 +30,25 @@ def _apply_marks(run: Any, marks: list[dict]) -> None:
 
 def _fill_inline(para: Any, nodes: list[dict]) -> None:
     for node in nodes:
-        if node.get("type") == "text":
+        node_type = node.get("type")
+        if node_type == "text":
             run = para.add_run(node.get("text", ""))
             _apply_marks(run, node.get("marks", []))
-        elif node.get("type") == "hard_break":
+        elif node_type == "hard_break":
             para.add_run().add_break()
+        elif node_type == "custom_inline":
+            conteudo = node.get("content", [])
+            if conteudo:
+                _fill_inline(para, conteudo)
+            else:
+                label = (node.get("attrs") or {}).get("label")
+                if label:
+                    run = para.add_run(f"[{label}]")
+                    _apply_marks(run, node.get("marks", []))
+        elif node_type in ("var_text", "variable"):
+            ref = (node.get("attrs") or {}).get("ref", "")
+            run = para.add_run(f"[{ref}]" if ref else "[variável não resolvida]")
+            _apply_marks(run, node.get("marks", []))
 
 
 # ── Block renderers ───────────────────────────────────────────────

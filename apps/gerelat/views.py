@@ -707,15 +707,22 @@ class TemplateViewSet(viewsets.ModelViewSet):
             status=status.HTTP_202_ACCEPTED,
         )
 
-    @action(detail=True, methods=["get"], url_path="preview")
+    @action(detail=True, methods=["get", "post"], url_path="preview")
     def preview(self, request, pk=None):
         """
         Resolve as variáveis (campos nativos + customizadas) visíveis para a
         cadeia de instâncias informada e retorna o documento_json pronto para
         edição/preview no front-end.
+        Aceita GET (usando template.modelo_json) ou POST (com documento_json no payload).
         """
         template = self.get_object()
-        if not template.modelo_json:
+        modelo = (
+            request.data.get("documento_json")
+            if request.method == "POST" and isinstance(request.data, dict)
+            else None
+        ) or template.modelo_json
+
+        if not modelo:
             return Response(
                 {
                     "detail": "Template não possui modelo_json. Use um template criado pelo editor."
@@ -723,10 +730,15 @@ class TemplateViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        cliente_id = request.query_params.get("cliente_id") or template.cliente_id
-        programa_id = request.query_params.get("programa_id") or template.programa_id
-        projeto_id = request.query_params.get("projeto_id") or template.projeto_id
-        evento_id = request.query_params.get("evento_id")
+        params = (
+            request.data
+            if request.method == "POST" and isinstance(request.data, dict)
+            else request.query_params
+        )
+        cliente_id = params.get("cliente_id") or template.cliente_id
+        programa_id = params.get("programa_id") or template.programa_id
+        projeto_id = params.get("projeto_id") or template.projeto_id
+        evento_id = params.get("evento_id")
 
         variables = build_variables_context(
             cliente_id=cliente_id,
@@ -735,7 +747,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
             evento_id=evento_id,
         )
 
-        documento_json = replace_placeholders(template.modelo_json, variables)
+        documento_json = replace_placeholders(modelo, variables)
         return Response({"documento_json": documento_json})
 
     @action(detail=True, methods=["get"], url_path="nivel-exigido")

@@ -287,6 +287,15 @@ def _traverse_inline(
             result.extend(
                 _inline_nodes_from_valor(ref, valor, variables, pilha, profundidade)
             )
+        elif node.get("type") == "custom_inline":
+            new_node = copy.copy(node)
+            new_node["content"] = _traverse_inline(
+                node.get("content", []),
+                variables,
+                pilha=pilha,
+                profundidade=profundidade,
+            )
+            result.append(new_node)
         else:
             result.append(node)
     return result
@@ -318,9 +327,7 @@ def _traverse_blocks(
             ref = attrs.get("ref", "")
             valor = variables.get(ref)
             if ref in pilha or profundidade >= MAX_PROFUNDIDADE_RICHTEXT:
-                result.append(
-                    _paragrafo_texto(f'[ciclo de variáveis em "{ref}"]')
-                )
+                result.append(_paragrafo_texto(f'[ciclo de variáveis em "{ref}"]'))
             elif isinstance(valor, dict) and valor.get("type") == "doc":
                 filhos = _traverse_blocks(
                     valor.get("content", []),
@@ -407,7 +414,7 @@ def extract_gap_refs(
             ref = None
             if node_type in gap_ref_types:
                 ref = attrs.get("ref")
-            elif node_type == "custom_text":
+            elif node_type in ("custom_text", "custom_inline"):
                 ref = attrs.get("label")
             if ref:
                 refs.add(ref)

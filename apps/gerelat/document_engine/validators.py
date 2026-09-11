@@ -76,7 +76,14 @@ def validate_text(value: Any) -> None:
 # texto rico: um texto rico não pode conter outro texto rico.
 _RICHTEXT_NODE_TYPES = {"var_richtext"}
 # Tipos de nó de variável que carregam uma referência e podem aparecer no valor.
-_VAR_NODE_TYPES = {"var_text", "variable", "var_image", "image_ref", "var_table", "table_ref"}
+_VAR_NODE_TYPES = {
+    "var_text",
+    "variable",
+    "var_image",
+    "image_ref",
+    "var_table",
+    "table_ref",
+}
 
 
 def _check_richtext_restrictions(node: Any) -> None:
@@ -91,7 +98,7 @@ def _check_richtext_restrictions(node: Any) -> None:
         _raise_schema_error(
             "Um texto rico não pode conter outra variável de texto rico."
         )
-    if node_type == "custom_text":
+    if node_type in ("custom_text", "custom_inline"):
         _raise_schema_error(
             "Blocos manuais só existem em templates, não no valor de uma variável."
         )

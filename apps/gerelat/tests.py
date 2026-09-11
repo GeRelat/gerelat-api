@@ -2392,3 +2392,140 @@ class AssinaturasRelatorioTest(TestCase):
         self.assertFalse(
             AssinaturaTemplate.objects.filter(template=self.template).exists()
         )
+
+
+class CustomInlineTest(TestCase):
+    def test_custom_inline_converters_e_renderer(self):
+        from apps.gerelat.document_engine.converters import (
+            extract_gap_refs,
+            replace_placeholders,
+        )
+        from apps.gerelat.document_engine.renderer import prosemirror_to_docx
+
+        template = {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "text", "text": "Fiscal: "},
+                        {
+                            "type": "custom_inline",
+                            "attrs": {"label": "nome_fiscal"},
+                            "content": [{"type": "text", "text": "Dr. João"}],
+                        },
+                    ],
+                }
+            ],
+        }
+
+        refs = extract_gap_refs(template)
+        self.assertIn("nome_fiscal", refs)
+
+        resolvido = replace_placeholders(template, {})
+        self.assertEqual(resolvido["content"][0]["content"][1]["type"], "custom_inline")
+        self.assertEqual(
+            resolvido["content"][0]["content"][1]["content"][0]["text"], "Dr. João"
+        )
+
+        docx_stream = prosemirror_to_docx(resolvido)
+        self.assertIsNotNone(docx_stream)
+
+    def test_validate_richtext_rejeita_custom_inline(self):
+        from django.core.exceptions import ValidationError
+
+        from apps.gerelat.document_engine.validators import validate_richtext
+
+        doc = {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "custom_inline",
+                            "attrs": {"label": "bloco"},
+                            "content": [{"type": "text", "text": "x"}],
+                        }
+                    ],
+                }
+            ],
+        }
+        with self.assertRaises(ValidationError):
+            validate_richtext(doc)
+
+
+class TemplatePreviewPostTest(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIClient
+
+        from apps.gerelat.models import MembroGeRelat
+
+        self.user = User.objects.create_user(
+            email="admin@test.com", password="password123", full_name="Admin Test"
+        )
+        MembroGeRelat.objects.create(user=self.user)
+        self.client_api = APIClient()
+        self.client_api.force_authenticate(user=self.user)
+
+        self.cli = Cliente.objects.create(
+            nome="Cliente A",
+            cnpj="22222222222222",
+            nome_contato="C",
+            email_contato="c@c.com",
+            fone_contato="1",
+            numero_contrato="1",
+            data_termino_contrato="2030-01-01",
+        )
+        self.prog = Programa.objects.create(nome="Programa A", cliente=self.cli)
+        self.proj = Projeto.objects.create(nome="Projeto A", programa=self.prog)
+        self.template = Template.objects.create(
+            nome="Template Teste",
+            projeto=self.proj,
+            nivel=NivelTemplate.PROJETO,
+            modelo_json={
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {"type": "text", "text": "Projeto: "},
+                            {
+                                "type": "var_text",
+                                "attrs": {"ref": "sistema.projeto.nome"},
+                            },
+                        ],
+                    }
+                ],
+            },
+        )
+
+    def test_preview_get_usa_modelo_salvo(self):
+        res = self.client_api.get(f"/templates/{self.template.id}/preview/")
+        self.assertEqual(res.status_code, 200)
+        content = res.data["documento_json"]["content"][0]["content"]
+        self.assertEqual(content[0]["text"], "Projeto: ")
+        self.assertEqual(content[1]["text"], "Projeto A")
+
+    def test_preview_post_usa_documento_enviado(self):
+        custom_doc = {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "text", "text": "Draft projeto: "},
+                        {"type": "var_text", "attrs": {"ref": "sistema.projeto.nome"}},
+                    ],
+                }
+            ],
+        }
+        res = self.client_api.post(
+            f"/templates/{self.template.id}/preview/",
+            {"documento_json": custom_doc},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200)
+        content = res.data["documento_json"]["content"][0]["content"]
+        self.assertEqual(content[0]["text"], "Draft projeto: ")
+        self.assertEqual(content[1]["text"], "Projeto A")
