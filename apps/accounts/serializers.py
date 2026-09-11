@@ -71,6 +71,9 @@ class UserSerializer(serializers.ModelSerializer):
         ]
 
     def get_contextos_acesso(self, user):
+        if hasattr(self, "_contextos_acesso_cache"):
+            return self._contextos_acesso_cache
+
         admin_gerelat = MembroGeRelat.objects.filter(user=user).exists() or bool(
             getattr(user, "is_superuser", False)
         )
@@ -82,7 +85,9 @@ class UserSerializer(serializers.ModelSerializer):
                     "papel": "admin",
                     "logomarca": cliente.logomarca_url,
                 }
-                for cliente in Cliente.objects.order_by("nome")
+                for cliente in Cliente.objects.select_related("logomarca").order_by(
+                    "nome"
+                )
             ]
         else:
             clientes_admin = [
@@ -92,9 +97,9 @@ class UserSerializer(serializers.ModelSerializer):
                     "papel": "admin",
                     "logomarca": membro.cliente.logomarca_url,
                 }
-                for membro in MembroCliente.objects.select_related("cliente").filter(
-                    user=user
-                )
+                for membro in MembroCliente.objects.select_related(
+                    "cliente__logomarca"
+                ).filter(user=user)
             ]
         programas = [
             {
@@ -110,7 +115,7 @@ class UserSerializer(serializers.ModelSerializer):
                 "papel": "membro",
             }
             for membro in MembroPrograma.objects.select_related(
-                "programa__cliente"
+                "programa__cliente__logomarca"
             ).filter(user=user)
         ]
         projetos = [
@@ -130,7 +135,7 @@ class UserSerializer(serializers.ModelSerializer):
                 "papel": "membro",
             }
             for membro in MembroProjeto.objects.select_related(
-                "projeto__programa__cliente"
+                "projeto__programa__cliente__logomarca"
             ).filter(user=user)
         ]
         solicitacoes_pendentes = [
@@ -139,13 +144,15 @@ class UserSerializer(serializers.ModelSerializer):
                 user=user, status=SolicitacaoCliente.STATUS_PENDENTE
             )
         ]
-        return {
+        resultado = {
             "admin_gerelat": admin_gerelat,
             "clientes_admin": clientes_admin,
             "programas": programas,
             "projetos": projetos,
             "solicitacoes_pendentes": solicitacoes_pendentes,
         }
+        self._contextos_acesso_cache = resultado
+        return resultado
 
     def get_possui_contexto_acesso(self, user):
         contextos = self.get_contextos_acesso(user)
