@@ -46,6 +46,11 @@ router.register(
 
 urlpatterns = [
     path(
+        "dashboard/resumo/",
+        views.DashboardResumoView.as_view(),
+        name="dashboard-resumo",
+    ),
+    path(
         "programas/<int:programa_id>/membros/",
         views.AdicionarMembroProgramaView.as_view(),
         name="adicionar-membro-programa",

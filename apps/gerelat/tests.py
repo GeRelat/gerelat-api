@@ -35,6 +35,7 @@ from apps.gerelat.permissions import PodeAcessarProjeto
 from apps.gerelat.serializers import (
     AgendamentoRelatorioSerializer,
     ClienteSerializer,
+    EventoSerializer,
     TemplateClasseEventoSerializer,
 )
 from apps.gerelat.services.agendamento_relatorio import (
@@ -353,14 +354,15 @@ class EventosRelatorioTest(TestCase):
             data_termino_contrato="2030-01-01",
         )
         self.prog = Programa.objects.create(nome="Prog E", cliente=self.cli)
+        self.outro_prog = Programa.objects.create(nome="Outro Prog E", cliente=self.cli)
         self.proj1 = Projeto.objects.create(nome="Proj 1", programa=self.prog)
         self.proj2 = Projeto.objects.create(nome="Proj 2", programa=self.prog)
 
-        self.ce_proj1 = ClasseEvento.objects.create(
-            projeto=self.proj1, nome_classe="Reunião Proj 1"
-        )
         self.ce_prog = ClasseEvento.objects.create(
             programa=self.prog, nome_classe="Reunião Prog"
+        )
+        self.ce_outro_prog = ClasseEvento.objects.create(
+            programa=self.outro_prog, nome_classe="Reunião Outro Prog"
         )
 
         self.template_proj1 = Template.objects.create(
@@ -370,18 +372,18 @@ class EventosRelatorioTest(TestCase):
             modelo_json={"type": "doc", "content": []},
         )
         TemplateClasseEvento.objects.create(
-            template=self.template_proj1, classe_evento=self.ce_proj1
+            template=self.template_proj1, classe_evento=self.ce_prog
         )
 
         self.evento_valido = Evento.objects.create(
             projeto=self.proj1,
-            classe_evento=self.ce_proj1,
+            classe_evento=self.ce_prog,
             nome="Evento Valido",
             data="2026-08-10",
         )
         self.evento_proj2 = Evento.objects.create(
             projeto=self.proj2,
-            classe_evento=self.ce_proj1,
+            classe_evento=self.ce_prog,
             nome="Evento Proj Outro",
             data="2026-08-10",
         )
@@ -403,15 +405,55 @@ class EventosRelatorioTest(TestCase):
         self.assertNotIn(self.evento_proj2, evs)
 
     def test_validar_classe_evento_mesmo_escopo(self):
-        # ce_prog is scope (programa=self.prog), template_proj1 is scope (projeto=self.proj1)
+        # ce_outro_prog is programa=self.outro_prog, template_proj1 belongs to self.proj1 (programa=self.prog)
         with self.assertRaises(ValidationError):
-            validar_classe_evento_mesmo_escopo(self.template_proj1, self.ce_prog)
+            validar_classe_evento_mesmo_escopo(self.template_proj1, self.ce_outro_prog)
 
         serializer = TemplateClasseEventoSerializer(
-            data={"template": self.template_proj1.id, "classe_evento": self.ce_prog.id}
+            data={
+                "template": self.template_proj1.id,
+                "classe_evento": self.ce_outro_prog.id,
+            }
         )
         self.assertFalse(serializer.is_valid())
         self.assertIn("non_field_errors", serializer.errors)
+
+    def test_evento_serializer_rejeita_classe_de_outro_programa(self):
+        serializer = EventoSerializer(
+            data={
+                "projeto": self.proj1.id,
+                "classe_evento": self.ce_outro_prog.id,
+                "nome": "Oficina X",
+                "data": "2026-09-01",
+            }
+        )
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("classe_evento", serializer.errors)
+
+    def test_membro_projeto_le_classe_programa_mas_nao_cria(self):
+        user_proj = User.objects.create_user(
+            email="membro.proj@test.com",
+            password="password123",
+            full_name="Membro Proj",
+        )
+        MembroProjeto.objects.create(user=user_proj, projeto=self.proj1)
+
+        client = APIClient()
+        client.force_authenticate(user=user_proj)
+
+        # GET /classes-evento/ deve listar a classe do programa pai
+        res = client.get("/classes-evento/")
+        self.assertEqual(res.status_code, 200)
+        classes_ids = [c["id"] for c in res.data]
+        self.assertIn(self.ce_prog.id, classes_ids)
+
+        # POST /classes-evento/ deve ser proibido (403) para membro de projeto
+        res_post = client.post(
+            "/classes-evento/",
+            {"programa": self.prog.id, "nome_classe": "Nova Classe Tentativa"},
+            format="json",
+        )
+        self.assertEqual(res_post.status_code, 403)
 
 
 class RelatorioGenerateTest(TestCase):
@@ -434,7 +476,9 @@ class RelatorioGenerateTest(TestCase):
         self.prog = Programa.objects.create(nome="Prog R", cliente=self.cli)
         self.proj = Projeto.objects.create(nome="Proj R", programa=self.prog)
 
-        self.ce = ClasseEvento.objects.create(projeto=self.proj, nome_classe="Classe R")
+        self.ce = ClasseEvento.objects.create(
+            programa=self.prog, nome_classe="Classe R"
+        )
         self.template = Template.objects.create(
             projeto=self.proj,
             nivel=NivelTemplate.PROJETO,
@@ -447,7 +491,7 @@ class RelatorioGenerateTest(TestCase):
         # Not linked via TemplateClasseEvento, or linked to another class
 
         self.ce_outra = ClasseEvento.objects.create(
-            projeto=self.proj, nome_classe="Classe Outra"
+            programa=self.prog, nome_classe="Classe Outra"
         )
         self.evento_incompativel = Evento.objects.create(
             projeto=self.proj,
@@ -464,6 +508,60 @@ class RelatorioGenerateTest(TestCase):
         }
         response = self.client_api.post("/relatorios/", payload, format="json")
         self.assertEqual(response.status_code, 400)
+
+    def test_relatorio_create_sem_projeto_e_sem_evento_rejeita(self):
+        template_programa = Template.objects.create(
+            programa=self.prog,
+            nivel=NivelTemplate.PROGRAMA,
+            nome="Template Prog",
+            modelo_json={"type": "doc", "content": []},
+        )
+        payload = {
+            "template": template_programa.id,
+        }
+        response = self.client_api.post("/relatorios/", payload, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("projeto", response.json())
+
+    def test_relatorio_queryset_membro_projeto_enxerga_relatorio_sem_evento(self):
+        user_membro = User.objects.create_user(
+            email="membro_proj@test.com", password="password123", full_name="Membro"
+        )
+        MembroProjeto.objects.create(user=user_membro, projeto=self.proj)
+
+        rel = Relatorio.objects.create(
+            projeto=self.proj,
+            template=self.template,
+            nome="Relatorio Direto do Projeto",
+            status="SUCCESS",
+            documento_json={"type": "doc", "content": []},
+        )
+
+        client_membro = APIClient()
+        client_membro.force_authenticate(user=user_membro)
+        response = client_membro.get("/relatorios/")
+        self.assertEqual(response.status_code, 200)
+        ids = [item["id"] for item in response.json()]
+        self.assertIn(rel.id, ids)
+
+    def test_template_queryset_membro_projeto_enxerga_template_do_programa(self):
+        template_programa = Template.objects.create(
+            programa=self.prog,
+            nivel=NivelTemplate.PROGRAMA,
+            nome="Template Herdado do Programa",
+            modelo_json={"type": "doc", "content": []},
+        )
+        user_membro = User.objects.create_user(
+            email="membro_p2@test.com", password="password123", full_name="Membro 2"
+        )
+        MembroProjeto.objects.create(user=user_membro, projeto=self.proj)
+
+        client_membro = APIClient()
+        client_membro.force_authenticate(user=user_membro)
+        response = client_membro.get("/templates/")
+        self.assertEqual(response.status_code, 200)
+        ids = [item["id"] for item in response.json()]
+        self.assertIn(template_programa.id, ids)
 
 
 class AssetLogomarcaTest(TestCase):
@@ -518,6 +616,34 @@ class AssetLogomarcaTest(TestCase):
         ).first()
         self.assertIsNotNone(uso)
         self.assertEqual(uso.programa, self.programa)
+
+    def test_troca_logomarca_cliente_exclui_asset_anterior(self):
+        asset1 = Asset.objects.create(
+            arquivo="assets/logo-antiga.png", cliente=self.cliente
+        )
+        self.cliente.logomarca = asset1
+        self.cliente.save()
+
+        self.assertTrue(Asset.objects.filter(id=asset1.id).exists())
+        self.assertTrue(
+            AssetUso.objects.filter(
+                asset=asset1,
+                cliente=self.cliente,
+                tipo_uso=AssetUso.TIPO_USO_LOGOMARCA_CLIENTE,
+            ).exists()
+        )
+
+        # Troca para um novo asset
+        asset2 = Asset.objects.create(
+            arquivo="assets/logo-nova.png", cliente=self.cliente
+        )
+        self.cliente.logomarca = asset2
+        self.cliente.save()
+
+        # O asset1 anterior deve ter sido excluído do banco
+        self.assertFalse(Asset.objects.filter(id=asset1.id).exists())
+        self.assertTrue(Asset.objects.filter(id=asset2.id).exists())
+        self.assertEqual(self.cliente.logomarca, asset2)
 
 
 class AgendamentoRelatorioConcorrenciaTest(TransactionTestCase):
@@ -585,6 +711,129 @@ class AgendamentoRelatorioConcorrenciaTest(TransactionTestCase):
         # disparar generate_relatorio.delay (a outra encontra o registro
         # bloqueado e sai via skip_locked, ou entra na trava de 10s).
         self.assertEqual(mock_delay.call_count, 1)
+
+
+class DashboardResumoTest(TestCase):
+    def setUp(self):
+        self.client_api = APIClient()
+        self.admin = User.objects.create_superuser(
+            email="admin_dash@test.com",
+            password="password123",
+            full_name="Admin Dash",
+        )
+        self.cli1 = Cliente.objects.create(
+            nome="Cliente Dash 1",
+            cnpj="11111111111111",
+            data_termino_contrato="2030-01-01",
+        )
+        self.prog1 = Programa.objects.create(nome="Prog Dash 1", cliente=self.cli1)
+        self.proj1 = Projeto.objects.create(nome="Proj Dash 1", programa=self.prog1)
+        self.ce1 = ClasseEvento.objects.create(
+            programa=self.prog1, nome_classe="Classe 1"
+        )
+        self.evento1 = Evento.objects.create(
+            projeto=self.proj1,
+            classe_evento=self.ce1,
+            nome="Evento Dash 1",
+            data="2026-09-10",
+        )
+        self.template1 = Template.objects.create(
+            projeto=self.proj1,
+            nivel=NivelTemplate.PROJETO,
+            nome="Template Dash 1",
+            modelo_json={"type": "doc", "content": []},
+        )
+        self.relatorio1 = Relatorio.objects.create(
+            projeto=self.proj1,
+            template=self.template1,
+            nome="Relatorio Dash 1",
+            status="SUCCESS",
+            documento_json={"type": "doc", "content": []},
+        )
+
+        # Segundo cliente
+        self.cli2 = Cliente.objects.create(
+            nome="Cliente Dash 2",
+            cnpj="22222222222222",
+            data_termino_contrato="2030-01-01",
+        )
+        self.prog2 = Programa.objects.create(nome="Prog Dash 2", cliente=self.cli2)
+        self.proj2 = Projeto.objects.create(nome="Proj Dash 2", programa=self.prog2)
+
+    def test_admin_resumo_global_e_filtrado(self):
+        self.client_api.force_authenticate(user=self.admin)
+
+        # Global
+        res_global = self.client_api.get("/dashboard/resumo/")
+        self.assertEqual(res_global.status_code, 200)
+        data_global = res_global.json()
+        self.assertEqual(data_global["programas"], 2)
+        self.assertEqual(data_global["projetos"], 2)
+        self.assertEqual(data_global["eventos"], 1)
+        self.assertEqual(data_global["templates"], 1)
+        self.assertEqual(data_global["relatorios"], 1)
+
+        # Filtrado por cliente 1
+        res_cli1 = self.client_api.get(f"/dashboard/resumo/?cliente_id={self.cli1.id}")
+        self.assertEqual(res_cli1.status_code, 200)
+        data_cli1 = res_cli1.json()
+        self.assertEqual(data_cli1["programas"], 1)
+        self.assertEqual(data_cli1["projetos"], 1)
+        self.assertEqual(data_cli1["eventos"], 1)
+        self.assertEqual(data_cli1["templates"], 1)
+        self.assertEqual(data_cli1["relatorios"], 1)
+
+        # Filtrado por cliente 2
+        res_cli2 = self.client_api.get(f"/dashboard/resumo/?cliente_id={self.cli2.id}")
+        self.assertEqual(res_cli2.status_code, 200)
+        data_cli2 = res_cli2.json()
+        self.assertEqual(data_cli2["programas"], 1)
+        self.assertEqual(data_cli2["projetos"], 1)
+        self.assertEqual(data_cli2["eventos"], 0)
+        self.assertEqual(data_cli2["templates"], 0)
+        self.assertEqual(data_cli2["relatorios"], 0)
+
+    def test_membro_projeto_resumo_escopado(self):
+        user_membro = User.objects.create_user(
+            email="membro_dash@test.com",
+            password="password123",
+            full_name="Membro Dash",
+        )
+        MembroProjeto.objects.create(user=user_membro, projeto=self.proj1)
+
+        client_membro = APIClient()
+        client_membro.force_authenticate(user=user_membro)
+
+        res = client_membro.get("/dashboard/resumo/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["programas"], 1)  # Herdado via projeto
+        self.assertEqual(data["projetos"], 1)
+        self.assertEqual(data["eventos"], 1)
+        self.assertEqual(data["templates"], 1)
+        self.assertEqual(data["relatorios"], 1)
+
+        # Com filtro de cliente_id
+        res_filtrado = client_membro.get(
+            f"/dashboard/resumo/?cliente_id={self.cli1.id}"
+        )
+        self.assertEqual(res_filtrado.status_code, 200)
+        data_f = res_filtrado.json()
+        self.assertEqual(data_f["programas"], 1)
+        self.assertEqual(data_f["projetos"], 1)
+        self.assertEqual(data_f["eventos"], 1)
+        self.assertEqual(data_f["templates"], 1)
+        self.assertEqual(data_f["relatorios"], 1)
+
+        # Com filtro de outro cliente (sem acesso)
+        res_outro = client_membro.get(f"/dashboard/resumo/?cliente_id={self.cli2.id}")
+        self.assertEqual(res_outro.status_code, 200)
+        data_o = res_outro.json()
+        self.assertEqual(data_o["programas"], 0)
+        self.assertEqual(data_o["projetos"], 0)
+        self.assertEqual(data_o["eventos"], 0)
+        self.assertEqual(data_o["templates"], 0)
+        self.assertEqual(data_o["relatorios"], 0)
 
 
 class ClienteSerializerTest(TestCase):
@@ -1343,12 +1592,14 @@ class AgendamentoRelatorioTest(TestCase):
             cliente=outro_cliente,
             modelo_json={},
         )
+        prog_swap = Programa.objects.create(nome="Prog Swap", cliente=self.cliente)
+        proj_swap = Projeto.objects.create(nome="Proj Swap", programa=prog_swap)
         ce_swap = ClasseEvento.objects.create(
-            cliente=self.cliente, nome_classe="Classe Swap"
+            programa=prog_swap, nome_classe="Classe Swap"
         )
         evento = Evento.objects.create(
             nome="Evento do Cliente Original",
-            cliente=self.cliente,
+            projeto=proj_swap,
             classe_evento=ce_swap,
             data="2026-08-10",
         )
@@ -1644,6 +1895,154 @@ class TextoRicoAninhadoTest(TestCase):
         nivel = scan_required_nivel(template_json, cliente=cli, programa=prog)
         self.assertEqual(nivel, "evento")
 
+    def test_scan_required_nivel_propaga_por_campo_customizado_de_projeto(self):
+        """Mesmo cenário relatado em produção: um texto rico de nível PROGRAMA
+        (mesmo valor para todo projeto do programa) cujo conteúdo cita uma
+        CampoDefinicao customizada — não um campo sistema.* — cujo
+        nivel_aplicacao é PROJETO. O nível exigido pelo template tem que
+        refletir essa dependência escondida dentro do texto rico, mesmo que
+        nenhum projeto tenha sido informado ainda."""
+        from apps.gerelat.document_engine.scope import scan_required_nivel
+
+        cli = Cliente.objects.create(
+            nome="Brisa",
+            cnpj="22222222222222",
+            nome_contato="C2",
+            email_contato="c2@c.com",
+            fone_contato="2222",
+            numero_contrato="102",
+            data_termino_contrato="2030-01-01",
+        )
+        prog = Programa.objects.create(nome="TIC56", cliente=cli)
+
+        CampoDefinicao.objects.create(
+            programa=prog,
+            nivel_aplicacao=NivelAplicacao.PROJETO,
+            referencia="nome_escola",
+            descricao="Escola atendida pelo projeto",
+            tipo=CampoTipo.TEXT,
+        )
+        cd_texto = CampoDefinicao.objects.create(
+            programa=prog,
+            nivel_aplicacao=NivelAplicacao.PROGRAMA,
+            referencia="texto_padrao",
+            descricao="Parágrafo padrão do relatório",
+            tipo=CampoTipo.RICHTEXT,
+        )
+        CampoValor.objects.create(
+            definicao=cd_texto,
+            programa=prog,
+            valor=self._doc(
+                self._par(
+                    self._txt("Atividade realizada na escola "),
+                    self._var_text("nome_escola"),
+                    self._txt("."),
+                )
+            ),
+        )
+
+        template_json = self._doc(
+            {"type": "var_richtext", "attrs": {"ref": "texto_padrao"}}
+        )
+
+        # Nenhum projeto foi informado — só cliente/programa, como acontece na
+        # tela de gerar relatório antes do usuário escolher o projeto.
+        nivel = scan_required_nivel(template_json, cliente=cli, programa=prog)
+        self.assertEqual(nivel, "projeto")
+
+
+class TemplateNivelExigidoViewTest(TestCase):
+    """GET /templates/<id>/nivel-exigido/ — front-end consulta esse endpoint
+    em vez de reimplementar scan_required_nivel no cliente."""
+
+    def _doc(self, *blocos):
+        return {"type": "doc", "content": list(blocos)}
+
+    def _par(self, *inline):
+        return {"type": "paragraph", "content": list(inline)}
+
+    def _txt(self, texto):
+        return {"type": "text", "text": texto}
+
+    def _var_text(self, ref):
+        return {"type": "var_text", "attrs": {"ref": ref}}
+
+    def setUp(self):
+        self.client_api = APIClient()
+        self.user_admin = User.objects.create_user(
+            email="admin_nivel@test.com", password="pass", full_name="Admin"
+        )
+        MembroGeRelat.objects.create(user=self.user_admin)
+        self.client_api.force_authenticate(user=self.user_admin)
+
+        self.cliente = Cliente.objects.create(
+            nome="Brisa",
+            cnpj="33333333333333",
+            nome_contato="C3",
+            email_contato="c3@c.com",
+            fone_contato="3333",
+            numero_contrato="103",
+            data_termino_contrato="2030-01-01",
+        )
+        self.programa = Programa.objects.create(nome="TIC57", cliente=self.cliente)
+
+        CampoDefinicao.objects.create(
+            programa=self.programa,
+            nivel_aplicacao=NivelAplicacao.PROJETO,
+            referencia="nome_escola",
+            descricao="Escola atendida pelo projeto",
+            tipo=CampoTipo.TEXT,
+        )
+        cd_texto = CampoDefinicao.objects.create(
+            programa=self.programa,
+            nivel_aplicacao=NivelAplicacao.PROGRAMA,
+            referencia="texto_padrao",
+            descricao="Parágrafo padrão do relatório",
+            tipo=CampoTipo.RICHTEXT,
+        )
+        CampoValor.objects.create(
+            definicao=cd_texto,
+            programa=self.programa,
+            valor=self._doc(
+                self._par(
+                    self._txt("Atividade realizada na escola "),
+                    self._var_text("nome_escola"),
+                    self._txt("."),
+                )
+            ),
+        )
+
+        self.template = Template.objects.create(
+            nome="Relatório Programa",
+            programa=self.programa,
+            nivel=NivelTemplate.PROGRAMA,
+            modelo_json=self._doc(
+                {"type": "var_richtext", "attrs": {"ref": "texto_padrao"}}
+            ),
+        )
+
+    def test_nivel_exigido_reflete_dependencia_transitiva_do_texto_rico(self):
+        res = self.client_api.get(
+            f"/templates/{self.template.id}/nivel-exigido/",
+            {"programa_id": self.programa.id},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["nivel_exigido"], "projeto")
+
+    def test_nivel_exigido_null_quando_nao_ha_dependencia_de_nivel(self):
+        template_simples = Template.objects.create(
+            nome="Relatório Simples",
+            programa=self.programa,
+            nivel=NivelTemplate.PROGRAMA,
+            modelo_json=self._doc(self._par(self._txt("Sem variáveis."))),
+        )
+        res = self.client_api.get(
+            f"/templates/{template_simples.id}/nivel-exigido/",
+            {"programa_id": self.programa.id},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNone(res.data["nivel_exigido"])
+
 
 class CabecalhoLogosTest(TestCase):
     """Cabeçalho de página do .docx com as logomarcas do cliente e da parceira
@@ -1792,7 +2191,9 @@ class CabecalhoLogosTest(TestCase):
             modelo_json=self._DOC,
         )
         resultado = _do_generate_relatorio(
-            programa_id=self.prog.id, template_id=template.id
+            projeto_id=self.proj.id,
+            programa_id=self.prog.id,
+            template_id=template.id,
         )
         rel = Relatorio.objects.get(id=resultado["id"])
         self.cli.refresh_from_db()

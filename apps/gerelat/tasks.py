@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from .document_engine.converters import replace_placeholders
 from .document_engine.variables import build_variables_context
-from .models import AgendamentoRelatorio, Relatorio, Template
+from .models import AgendamentoRelatorio, Evento, Relatorio, Template
 from .services.agendamento_relatorio import sincronizar_periodic_task
 from .services.assinaturas_relatorio import resolver_assinaturas
 
@@ -47,11 +47,25 @@ def _do_generate_relatorio(
     if documento_json is None and template.modelo_json:
         documento_json = replace_placeholders(template.modelo_json, context)
 
+    if projeto_id is None and evento_id is not None:
+        try:
+            ev = Evento.objects.select_related("projeto").get(id=evento_id)
+            if ev.projeto_id:
+                projeto_id = ev.projeto_id
+        except Evento.DoesNotExist:
+            pass
+
+    if projeto_id is None and template.projeto_id is not None:
+        projeto_id = template.projeto_id
+
+    if projeto_id is None:
+        raise ValueError("projeto_id é obrigatório para gerar o relatório.")
+
     relatorio = Relatorio.objects.create(
+        projeto_id=projeto_id,
         evento_id=evento_id,
         template_id=template_id,
         nome=nome or template.nome,
-        arquivo_gerado="",
         status="SUCCESS",
         metadados=context,
         documento_json=documento_json or {},

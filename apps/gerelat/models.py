@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
 from .document_engine import validate_document_value
@@ -524,99 +524,34 @@ class EquipeProjeto(models.Model):
 
 
 class ClasseEvento(models.Model):
-    """Define uma classe de evento.
-
-    Escopo multi-nível: pode pertencer a Cliente, Programa ou Projeto.
-    Exatamente um dos três campos (cliente/programa/projeto) deve ser preenchido.
-    """
+    """Define uma classe de evento pertencente a um Programa."""
 
     id = models.AutoField(primary_key=True)
-    cliente = models.ForeignKey(
-        Cliente,
-        on_delete=models.CASCADE,
-        related_name="classes_evento",
-        null=True,
-        blank=True,
-    )
     programa = models.ForeignKey(
         Programa,
         on_delete=models.CASCADE,
         related_name="classes_evento",
-        null=True,
-        blank=True,
     )
-    projeto = models.ForeignKey(
-        Projeto,
-        on_delete=models.CASCADE,
-        related_name="classes_evento",
-        null=True,
-        blank=True,
-    )
-    cliente_id: int | None
-    programa_id: int | None
-    projeto_id: int | None
+    programa_id: int
     nome_classe = models.CharField(max_length=150)
 
     class Meta:
-        constraints = [
-            models.CheckConstraint(
-                condition=(
-                    Q(
-                        cliente__isnull=False,
-                        programa__isnull=True,
-                        projeto__isnull=True,
-                    )
-                    | Q(
-                        programa__isnull=False,
-                        cliente__isnull=True,
-                        projeto__isnull=True,
-                    )
-                    | Q(
-                        projeto__isnull=False,
-                        cliente__isnull=True,
-                        programa__isnull=True,
-                    )
-                ),
-                name="classe_evento_exactly_one_scope",
-            )
-        ]
+        ordering = ["nome_classe"]
 
     def __str__(self):
         return self.nome_classe
 
 
 class Evento(models.Model):
-    """Representa um evento.
-
-    Escopo multi-nível: pode pertencer a Cliente, Programa ou Projeto.
-    Exatamente um dos três campos (cliente/programa/projeto) deve ser preenchido.
-    """
+    """Representa um evento pertencente a um Projeto."""
 
     id = models.AutoField(primary_key=True)
-    cliente = models.ForeignKey(
-        Cliente,
-        on_delete=models.CASCADE,
-        related_name="eventos",
-        null=True,
-        blank=True,
-    )
-    programa = models.ForeignKey(
-        Programa,
-        on_delete=models.CASCADE,
-        related_name="eventos",
-        null=True,
-        blank=True,
-    )
     projeto = models.ForeignKey(
         Projeto,
         on_delete=models.CASCADE,
         related_name="eventos",
-        null=True,
-        blank=True,
     )
-    cliente_id: int | None
-    programa_id: int | None
-    projeto_id: int | None
+    projeto_id: int
     classe_evento = models.ForeignKey(
         ClasseEvento, on_delete=models.CASCADE, related_name="eventos"
     )
@@ -627,28 +562,7 @@ class Evento(models.Model):
     objetivo = models.TextField(blank=True, default="")
 
     class Meta:
-        constraints = [
-            models.CheckConstraint(
-                condition=(
-                    Q(
-                        cliente__isnull=False,
-                        programa__isnull=True,
-                        projeto__isnull=True,
-                    )
-                    | Q(
-                        programa__isnull=False,
-                        cliente__isnull=True,
-                        projeto__isnull=True,
-                    )
-                    | Q(
-                        projeto__isnull=False,
-                        cliente__isnull=True,
-                        programa__isnull=True,
-                    )
-                ),
-                name="evento_exactly_one_scope",
-            )
-        ]
+        ordering = ["-data", "nome"]
 
     def __str__(self):
         return self.nome
@@ -680,7 +594,6 @@ class Template(models.Model):
     projeto_id: int
     nivel = models.CharField(max_length=20, choices=NivelTemplate.choices)
     nome = models.CharField(max_length=150)
-    modelo_arquivo_base = models.CharField(max_length=255)
     data_criacao = models.DateTimeField(auto_now_add=True)
     ultima_atualizacao = models.DateTimeField(auto_now=True)
     modelo_json = models.JSONField(default=dict, blank=False, null=False)
@@ -961,9 +874,33 @@ def _ao_salvar_programa(sender, instance, **kwargs):
     sincronizar_asset_uso_logomarca(instance, AssetUso.TIPO_USO_LOGOMARCA_PROGRAMA)
 
 
+@receiver(pre_save, sender=Cliente)
+def _ao_pre_salvar_cliente(sender, instance, **kwargs):
+    if instance.pk:
+        try:
+            antigo = (
+                Cliente.objects.filter(pk=instance.pk).values("logomarca_id").first()
+            )
+            instance._antigo_logomarca_id = antigo["logomarca_id"] if antigo else None
+        except Exception:
+            instance._antigo_logomarca_id = None
+    else:
+        instance._antigo_logomarca_id = None
+
+
 @receiver(post_save, sender=Cliente)
 def _ao_salvar_cliente(sender, instance, **kwargs):
+    antigo_logomarca_id = getattr(instance, "_antigo_logomarca_id", None)
+    novo_logomarca_id = instance.logomarca_id
     sincronizar_asset_uso_logomarca(instance, AssetUso.TIPO_USO_LOGOMARCA_CLIENTE)
+
+    if antigo_logomarca_id and antigo_logomarca_id != novo_logomarca_id:
+        try:
+            antigo_asset = Asset.objects.get(pk=antigo_logomarca_id)
+            antigo_asset.usos.all().delete()
+            antigo_asset.delete()
+        except Asset.DoesNotExist:
+            pass
 
 
 @receiver(post_save, sender=Projeto)
@@ -1075,6 +1012,11 @@ def sincronizar_asset_uso_logomarca(entidade, tipo_uso: str):
 
 class Relatorio(models.Model):
     id = models.AutoField(primary_key=True)
+    projeto = models.ForeignKey(
+        Projeto,
+        on_delete=models.CASCADE,
+        related_name="relatorios",
+    )
     evento = models.ForeignKey(
         Evento,
         on_delete=models.SET_NULL,
@@ -1085,7 +1027,6 @@ class Relatorio(models.Model):
     template = models.ForeignKey(
         Template, on_delete=models.PROTECT, related_name="relatorios"
     )
-    arquivo_gerado = models.CharField(max_length=255)
     nome = models.CharField(max_length=150, blank=True, default="")
     status = models.CharField(max_length=50)
     metadados = models.JSONField(default=dict, blank=True)

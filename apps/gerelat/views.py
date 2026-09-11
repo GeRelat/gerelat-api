@@ -38,11 +38,10 @@ from .document_engine.renderer import (
     logos_cabecalho_de_metadados,
     prosemirror_to_docx,
 )
+from .document_engine.scope import scan_required_nivel
 from .document_engine.system_fields import get_system_fields_for_level
 from .document_engine.utils import (
     build_docx_filename_and_content_disposition,
-    build_render_context,
-    render_docx_from_template,
 )
 from .document_engine.variables import build_variables_context
 from .enums import NivelTemplate
@@ -78,6 +77,7 @@ from .serializers import (
     CampoValorSerializer,
     ClasseEventoSerializer,
     ClienteSerializer,
+    DashboardResumoSerializer,
     EquipeProgramaSerializer,
     EquipeProjetoSerializer,
     EventoSerializer,
@@ -545,23 +545,32 @@ class ClasseEventoViewSet(viewsets.ModelViewSet):
             return ClasseEvento.objects.none()
         if perms.is_platform_admin(user):
             return ClasseEvento.objects.all().select_related(
-                "cliente", "programa", "projeto"
+                "programa", "programa__cliente"
             )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
-        projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
+        programas_via_projetos = MembroProjeto.objects.filter(user=user).values(
+            "projeto__programa"
+        )
         return (
             ClasseEvento.objects.filter(
-                Q(cliente__in=clientes_admin)
+                Q(programa__cliente__in=clientes_admin)
                 | Q(programa__in=programas_membro)
-                | Q(programa__cliente__in=clientes_admin)
-                | Q(projeto__in=projetos_membro)
-                | Q(projeto__programa__in=programas_membro)
-                | Q(projeto__programa__cliente__in=clientes_admin)
+                | Q(programa__in=programas_via_projetos)
             )
             .distinct()
-            .select_related("cliente", "programa", "projeto")
+            .select_related("programa", "programa__cliente")
         )
+
+    def perform_create(self, serializer):
+        programa = serializer.validated_data.get("programa")
+        if programa:
+            nivel = perms.get_nivel_acesso_programa(self.request.user, programa)
+            if nivel not in ("admin_gerelat", "admin_cliente", "membro_programa"):
+                raise PermissionDenied(
+                    "Você não tem permissão para criar classes de evento neste programa."
+                )
+        serializer.save()
 
 
 class EventoViewSet(viewsets.ModelViewSet):
@@ -575,23 +584,30 @@ class EventoViewSet(viewsets.ModelViewSet):
             return Evento.objects.none()
         if perms.is_platform_admin(user):
             return Evento.objects.all().select_related(
-                "classe_evento", "cliente", "programa", "projeto"
+                "classe_evento", "projeto", "projeto__programa"
             )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
         return (
             Evento.objects.filter(
-                Q(cliente__in=clientes_admin)
-                | Q(programa__in=programas_membro)
-                | Q(programa__cliente__in=clientes_admin)
-                | Q(projeto__in=projetos_membro)
+                Q(projeto__programa__cliente__in=clientes_admin)
                 | Q(projeto__programa__in=programas_membro)
-                | Q(projeto__programa__cliente__in=clientes_admin)
+                | Q(projeto__in=projetos_membro)
             )
             .distinct()
-            .select_related("classe_evento", "cliente", "programa", "projeto")
+            .select_related("classe_evento", "projeto", "projeto__programa")
         )
+
+    def perform_create(self, serializer):
+        projeto = serializer.validated_data.get("projeto")
+        if projeto:
+            nivel = perms.get_nivel_acesso(self.request.user, projeto)
+            if nivel is None:
+                raise PermissionDenied(
+                    "Você não tem permissão para criar eventos neste projeto."
+                )
+        serializer.save()
 
 
 class TemplateViewSet(viewsets.ModelViewSet):
@@ -611,10 +627,14 @@ class TemplateViewSet(viewsets.ModelViewSet):
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
+        programas_via_projetos = MembroProjeto.objects.filter(user=user).values(
+            "projeto__programa"
+        )
         return (
             Template.objects.filter(
                 Q(cliente__in=clientes_admin)
                 | Q(programa__in=programas_membro)
+                | Q(programa__in=programas_via_projetos)
                 | Q(programa__cliente__in=clientes_admin)
                 | Q(projeto__in=projetos_membro)
                 | Q(projeto__programa__in=programas_membro)
@@ -717,6 +737,50 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
         documento_json = replace_placeholders(template.modelo_json, variables)
         return Response({"documento_json": documento_json})
+
+    @action(detail=True, methods=["get"], url_path="nivel-exigido")
+    def nivel_exigido(self, request, pk=None):
+        """
+        Nível mais profundo (cliente/programa/projeto/evento) exigido para
+        resolver todos os gaps do template dada a cadeia de instâncias já
+        conhecida — inclusive os usados apenas transitivamente, dentro do
+        valor de variáveis de texto rico citadas pelo template
+        (`document_engine.scope.scan_required_nivel`).
+
+        Usado pelo front-end para decidir quais seletores mostrar como
+        obrigatórios *antes* de tentar gerar o relatório, sem precisar
+        replicar a varredura de `scan_required_nivel` no cliente.
+        """
+        template = self.get_object()
+        if not template.modelo_json:
+            return Response(
+                {
+                    "detail": "Template não possui modelo_json. Use um template criado pelo editor."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cliente = programa = projeto = None
+        cliente_id = request.query_params.get("cliente_id")
+        programa_id = request.query_params.get("programa_id")
+        projeto_id = request.query_params.get("projeto_id")
+
+        if projeto_id:
+            projeto = Projeto.objects.select_related("programa__cliente").get(
+                id=projeto_id
+            )
+            programa = projeto.programa
+            cliente = programa.cliente
+        elif programa_id:
+            programa = Programa.objects.select_related("cliente").get(id=programa_id)
+            cliente = programa.cliente
+        elif cliente_id:
+            cliente = Cliente.objects.get(id=cliente_id)
+
+        nivel = scan_required_nivel(
+            template.modelo_json, cliente=cliente, programa=programa, projeto=projeto
+        )
+        return Response({"nivel_exigido": nivel})
 
     @action(detail=False, methods=["get"], url_path="variaveis-disponiveis")
     def variaveis_disponiveis(self, request):
@@ -1131,21 +1195,20 @@ class RelatorioViewSet(viewsets.ModelViewSet):
         if not perms.is_authenticated(user):
             return Relatorio.objects.none()
         if perms.is_platform_admin(user):
-            return Relatorio.objects.all().select_related("template", "evento")
+            return Relatorio.objects.all().select_related(
+                "template", "evento", "projeto"
+            )
         clientes_admin = Cliente.objects.filter(membros__user=user)
         programas_membro = MembroPrograma.objects.filter(user=user).values("programa")
         projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
         return (
             Relatorio.objects.filter(
-                Q(evento__projeto__programa__cliente__in=clientes_admin)
-                | Q(evento__projeto__programa__in=programas_membro)
-                | Q(evento__projeto__in=projetos_membro)
-                | Q(evento__programa__cliente__in=clientes_admin)
-                | Q(evento__programa__in=programas_membro)
-                | Q(evento__cliente__in=clientes_admin)
+                Q(projeto__in=projetos_membro)
+                | Q(projeto__programa__in=programas_membro)
+                | Q(projeto__programa__cliente__in=clientes_admin)
             )
             .distinct()
-            .select_related("template", "evento")
+            .select_related("template", "evento", "projeto")
         )
 
     @extend_schema(
@@ -1223,10 +1286,11 @@ class RelatorioViewSet(viewsets.ModelViewSet):
             rendered = replace_placeholders(template.modelo_json, variables)
             output_buffer = prosemirror_to_docx(rendered, **extras)
         else:
-            # ── Legacy pipeline: docxtpl ───────────────────────
-            context = build_render_context(variables)
-            output_buffer = render_docx_from_template(
-                template.modelo_arquivo_base, context
+            return Response(
+                {
+                    "detail": "Relatório não possui documento_json ou modelo_json válido para download."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         content_disp = build_docx_filename_and_content_disposition(
@@ -1272,9 +1336,6 @@ class AgendamentoRelatorioViewSet(viewsets.ModelViewSet):
                 | Q(evento__projeto__programa__cliente__in=clientes_admin)
                 | Q(evento__projeto__programa__in=programas_membro)
                 | Q(evento__projeto__in=projetos_membro)
-                | Q(evento__programa__cliente__in=clientes_admin)
-                | Q(evento__programa__in=programas_membro)
-                | Q(evento__cliente__in=clientes_admin)
             ).distinct()
 
         cliente_id = self.request.query_params.get("cliente_id")
@@ -1284,8 +1345,6 @@ class AgendamentoRelatorioViewSet(viewsets.ModelViewSet):
                 | Q(programa__cliente_id=cliente_id)
                 | Q(projeto__programa__cliente_id=cliente_id)
                 | Q(evento__projeto__programa__cliente_id=cliente_id)
-                | Q(evento__programa__cliente_id=cliente_id)
-                | Q(evento__cliente_id=cliente_id)
             )
 
         return qs
@@ -1714,3 +1773,114 @@ class MembroProjetoViewSet(viewsets.ModelViewSet):
         ).select_related(
             "user", "projeto", "projeto__programa", "projeto__programa__cliente"
         )
+
+
+class DashboardResumoView(APIView):
+    """Retorna contadores de entidades para o resumo do dashboard respeitando o escopo do usuário."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="cliente_id",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Filtrar métricas por ID do cliente",
+            ),
+        ],
+        responses={200: DashboardResumoSerializer},
+    )
+    def get(self, request):
+        user = request.user
+        cliente_id_param = request.query_params.get(
+            "cliente_id"
+        ) or request.query_params.get("cliente")
+        cliente_id = None
+        if cliente_id_param:
+            try:
+                cliente_id = int(cliente_id_param)
+            except (ValueError, TypeError):
+                cliente_id = None
+
+        if perms.is_platform_admin(user):
+            qs_programas = Programa.objects.all()
+            qs_projetos = Projeto.objects.all()
+            qs_eventos = Evento.objects.all()
+            qs_templates = Template.objects.all()
+            qs_relatorios = Relatorio.objects.all()
+
+            if cliente_id is not None:
+                qs_programas = qs_programas.filter(cliente_id=cliente_id)
+                qs_projetos = qs_projetos.filter(programa__cliente_id=cliente_id)
+                qs_eventos = qs_eventos.filter(projeto__programa__cliente_id=cliente_id)
+                qs_templates = qs_templates.filter(
+                    Q(cliente_id=cliente_id)
+                    | Q(programa__cliente_id=cliente_id)
+                    | Q(projeto__programa__cliente_id=cliente_id)
+                )
+                qs_relatorios = qs_relatorios.filter(
+                    projeto__programa__cliente_id=cliente_id
+                )
+        else:
+            clientes_admin = Cliente.objects.filter(membros__user=user)
+            programas_membro = MembroPrograma.objects.filter(user=user).values(
+                "programa"
+            )
+            projetos_membro = MembroProjeto.objects.filter(user=user).values("projeto")
+            programas_via_projetos = MembroProjeto.objects.filter(user=user).values(
+                "projeto__programa"
+            )
+
+            qs_programas = Programa.objects.filter(
+                Q(cliente__in=clientes_admin)
+                | Q(id__in=programas_membro)
+                | Q(id__in=programas_via_projetos)
+            )
+            qs_projetos = Projeto.objects.filter(
+                Q(programa__cliente__in=clientes_admin)
+                | Q(programa__in=programas_membro)
+                | Q(id__in=projetos_membro)
+            )
+            qs_eventos = Evento.objects.filter(
+                Q(projeto__programa__cliente__in=clientes_admin)
+                | Q(projeto__programa__in=programas_membro)
+                | Q(projeto__in=projetos_membro)
+            )
+            qs_templates = Template.objects.filter(
+                Q(cliente__in=clientes_admin)
+                | Q(programa__in=programas_membro)
+                | Q(programa__in=programas_via_projetos)
+                | Q(programa__cliente__in=clientes_admin)
+                | Q(projeto__in=projetos_membro)
+                | Q(projeto__programa__in=programas_membro)
+                | Q(projeto__programa__cliente__in=clientes_admin)
+            )
+            qs_relatorios = Relatorio.objects.filter(
+                Q(projeto__in=projetos_membro)
+                | Q(projeto__programa__in=programas_membro)
+                | Q(projeto__programa__cliente__in=clientes_admin)
+            )
+
+            if cliente_id is not None:
+                qs_programas = qs_programas.filter(cliente_id=cliente_id)
+                qs_projetos = qs_projetos.filter(programa__cliente_id=cliente_id)
+                qs_eventos = qs_eventos.filter(projeto__programa__cliente_id=cliente_id)
+                qs_templates = qs_templates.filter(
+                    Q(cliente_id=cliente_id)
+                    | Q(programa__cliente_id=cliente_id)
+                    | Q(projeto__programa__cliente_id=cliente_id)
+                )
+                qs_relatorios = qs_relatorios.filter(
+                    projeto__programa__cliente_id=cliente_id
+                )
+
+        dados = {
+            "programas": qs_programas.distinct().count(),
+            "projetos": qs_projetos.distinct().count(),
+            "eventos": qs_eventos.distinct().count(),
+            "templates": qs_templates.distinct().count(),
+            "relatorios": qs_relatorios.distinct().count(),
+        }
+        return Response(dados)

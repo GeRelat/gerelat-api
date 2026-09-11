@@ -5,11 +5,7 @@ from .renderer import (
     logos_cabecalho_de_metadados,
     prosemirror_to_docx,
 )
-from .utils import (
-    build_render_context,
-    extract_text_from_value,
-    render_docx_from_template,
-)
+from .utils import build_docx_filename_and_content_disposition
 from .validators import (
     validate_document_value,
     validate_image,
@@ -33,8 +29,6 @@ __all__ = [
     "prosemirror_to_docx",
     "logos_cabecalho_de_metadados",
     "assinaturas_de_metadados",
-    # legacy utils (docxtpl path)
-    "extract_text_from_value",
-    "build_render_context",
-    "render_docx_from_template",
+    # utils
+    "build_docx_filename_and_content_disposition",
 ]
