@@ -146,6 +146,7 @@ _db_config: dict[str, object] = {
     "ENGINE": _db_engine,
     "NAME": os.getenv("DJANGO_DB_NAME", "gerelat"),
     "CONN_MAX_AGE": 0,
+    "CONN_HEALTH_CHECKS": True,
 }
 
 if _db_engine == "django.db.backends.postgresql":
@@ -154,6 +155,7 @@ if _db_engine == "django.db.backends.postgresql":
             "min_size": 2,
             "max_size": 10,
             "timeout": 10,
+            "max_lifetime": 900,
         },
     }
 
