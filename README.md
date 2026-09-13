@@ -5,89 +5,28 @@
 ```bash
 uv venv
 ```
-
 ---
 
 ### 2. Instalar dependências
 
-#### Produção + desenvolvimento:
-
 ```bash
 uv sync
 ```
+---
 
-#### Apenas produção:
+### 3. Configurar variáveis de ambiente
 
 ```bash
-uv sync --no-dev
+cp .env.example .env
 ```
+
+> **Nota:** No arquivo `.env`, configure:
+> - `DJANGO_DB_HOST=db` se estiver rodando via **Docker**.
+> - `DJANGO_DB_HOST=localhost` se estiver executando comandos **localmente**.
 
 ---
 
-### 3. Adicionar dependências
-
-#### Dependência de produção:
-
-```bash
-uv add <pacote>
-```
-
-Exemplo:
-
-```bash
-uv add docxtpl
-```
-
----
-
-#### Dependência de desenvolvimento:
-
-```bash
-uv add --dev <pacote>
-```
-
-Exemplo:
-
-```bash
-uv add --dev ruff pyright
-```
-
----
-
-### 4. Remover dependências
-
-```bash
-uv remove <pacote>
-```
-
----
-
-### 5. Atualizar dependências
-
-```bash
-uv lock --upgrade
-uv sync
-```
-
----
-
-### 6. Copiar .env.example para .env
-
-
-### 7. Rodar projeto Django (PostgreSQL necessário)
-
-```bash
-uv run manage.py runserver
-```
-ou
-
-```bash
-uv run granian config.asgi:application --interface asginl
-```
-
----
-
-### 7.1. Migrations
+### 4. Migrations
 
 Criar migrations:
 
@@ -103,9 +42,49 @@ uv run manage.py migrate
 
 ---
 
-### 8. Docker com Django e PostgreSQL
+### 5. Criar usuário administrador
 
-#### 8.1 Subir os containers (build + execução)
+Cria o superusuário inicial com o vínculo necessário em `MembroGeRelat`:
+
+```bash
+uv run manage.py create_admin --email admin@gerelat.tech --password admin123
+```
+
+*(Ou via Docker: `docker compose exec web uv run manage.py create_admin`)*
+
+---
+
+### 6. Execução local
+
+#### 6.1 Subir serviços de apoio (PostgreSQL e Redis)
+
+```bash
+docker compose up -d db redis
+```
+
+#### 6.2 Rodar a API Django
+
+```bash
+uv run manage.py runserver
+```
+
+#### 6.3 Rodar Celery (em terminais separados)
+
+Worker:
+```bash
+uv run celery -A config worker --loglevel=info
+```
+
+Beat (tarefas periódicas):
+```bash
+uv run celery -A config beat -l info
+```
+
+---
+
+### 7. Execução completa via Docker
+
+#### 7.1 Subir todos os containers (build + execução)
 
 ```bash
 docker compose up --build
@@ -117,47 +96,37 @@ Para rodar em segundo plano:
 docker compose up -d --build
 ```
 
-Para subir somente o banco (PostgreSQL):
+#### 7.2 Acessar a aplicação
 
-```bash
-docker compose up -d db
-```
+- **API:** http://127.0.0.1:8000/
+- **Django Admin:** http://127.0.0.1:8000/admin/
+- **Documentação Swagger:** http://127.0.0.1:8000/docs/
+- **OpenAPI Schema:** http://127.0.0.1:8000/schema/
+- **Silk (Profiler de queries/requests):** http://127.0.0.1:8000/silk/
+- **Healthcheck:** http://127.0.0.1:8000/health/
+- **Flower (monitoramento Celery):** http://127.0.0.1:5555/
 
-#### 8.2 Acessar a aplicação
-
-- API: http://127.0.0.1:8000/
-- Documentação Swagger: http://127.0.0.1:8000/docs/
-- Healthcheck: http://127.0.0.1:8000/health/
-- Flower (monitoramento Celery): http://127.0.0.1:5555/
-
-
-#### 8.3 Parar os containers
+#### 7.3 Parar os containers
 
 ```bash
 docker compose down
 ```
 
-Parar e remover também o volume do PostgreSQL:
+Parar e remover volumes (banco de dados):
 
 ```bash
 docker compose down -v
 ```
 
-Para parar somente o banco (PostgreSQL):
-
-```bash
-docker compose stop db
-```
-
-Para parar os serviços assíncronos (Celery/Redis/Flower):
-
-```bash
-docker compose stop worker redis flower
-```
-
 ---
 
-### 9. Executar ferramentas de qualidade (Extras)
+### 8. Ferramentas de qualidade e testes
+
+#### Testes automatizados
+
+```bash
+uv run manage.py test
+```
 
 #### Lint
 
