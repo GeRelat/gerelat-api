@@ -20,6 +20,8 @@ services:
         networks:
             - default
             - coolify
+        labels:
+            - "traefik.docker.network=coolify"
     worker:
         build: .
         command: celery -A config worker --loglevel=info
@@ -56,3 +58,5 @@ services:
         networks:
             - default
             - coolify
+        labels:
+            - "traefik.docker.network=coolify"
